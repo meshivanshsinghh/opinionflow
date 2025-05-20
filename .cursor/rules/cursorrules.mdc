@@ -1,0 +1,91 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+
+description: "Guidelines and guard‑rails for developing OpinionFlow – a real‑time, multi‑store review‑analysis agent.  Applies to all source code, docs, and notebook files in this repo."
+globs:
+
+* "\*\*/\*.py"
+* "\*\*/\*.md"
+* "Dockerfile"
+* "docker-compose.yml"
+* "\*.env.example"
+* "data/aspects.yaml"
+  alwaysApply: true
+
+---
+
+# 📦 Project Context
+
+**Project**: OpinionFlow – real‑time product‑review intelligence powered by Bright Data MCP, FastAPI, Streamlit, PGVector, LangChain RAG.
+**Goal**: Users enter a product → agent scrapes Amazon/Walmart/Target reviews live → AI summarises sentiment, pros/cons, aspects → UI displays insights & citations.
+**Scope (MVP)**: Instant Answer ▸ Overall Sentiment ▸ Pros/Cons ▸ Store Tabs ▸ Aspect Mini‑Charts ▸ Source Explorer.
+
+# 🛠️ Build Road‑map (for Cursor)
+
+1. Scaffold folders: `backend/`, `frontend/`, `data/`, `tests/`, `docker/`.
+2. FastAPI skeleton `/analyze` POST `{product:str}`.
+3. Bright Data client `backend/brightdata.py`: `discover_urls`, `scrape_reviews` (Web Unlocker + Playwright click “next page”).
+4. Site extractors `backend/extractors/*.py` → `Review` dataclass.
+5. Postgres + PGVector: tables `products`, `reviews`.
+6. Embeddings: MiniLM via SentenceTransformers.
+7. Aspect analysis: YAML map + Gemini prompt.
+8. Retrieval‑QA: LangChain + Llama‑3.
+9. Aggregate in `backend/analysis.py`.
+10. Streamlit UI `frontend/app.py`.
+11. Tests: pytest + fixtures.
+
+# 🏗️ Architecture Principles
+
+* Single‑responsibility modules.
+* Async I/O throughout.
+* Config via env vars (no hard‑coded secrets).
+* Graceful degradation on source failure.
+* Every AI answer must cite ≥2 review IDs.
+
+# 🐍 Python & Style
+
+* Python 3.11, Black, Ruff, mypy --strict.
+* Pydantic for schemas.
+* No blocking `requests` in async paths.
+
+# 🕸️ Bright Data Rules
+
+* Credentials only via env.
+* `discover_urls` uses SERP (✔ Discover).
+* `scrape_reviews` uses Web Unlocker (✔ Access), scroll & click (✔ Interact), parse JSON (✔ Extract).
+* Max 100 reviews per store, 1 s delay per page.
+
+# 🗄️ DB & Vector
+
+```sql
+CREATE TABLE products(id serial PRIMARY KEY,name text,last_scraped timestamp);
+CREATE TABLE reviews(id bigserial PRIMARY KEY,product_id int REFERENCES products,
+                     source text,rating real,text text,embed vector(384));
+CREATE INDEX ON reviews USING ivfflat(embed vector_cosine_ops) WITH (lists=100);
+```
+
+# 🤖 RAG Rules
+
+* Retriever k≤6, sim>0.4.
+* Prompt templates in `data/prompts/`.
+* Aspects YAML maintained via PR.
+
+# 📝 Commits & CI
+
+* Conventional commits.
+* Docstring headers required.
+* CI: lint, tests, build.
+
+# ⚠️ Anti‑patterns
+
+* Duplicate CSS selectors across files.
+* Storing raw HTML blobs.
+* Long blocking loops in request handler.
+
+@README.md
+@Dockerfile
+@backend/main.py
