@@ -3,20 +3,24 @@ from backend.services.brightdata import BrightDataClient
 from backend.extractors import WalmartExtractor, AmazonExtractor, TargetExtractor
 from backend.models.product import Product
 from datetime import datetime
-
+from backend.services.gemini import GeminiModel
+from uuid import uuid4
 
 class ProductService:
-    def __init__(self, bright_data_client: Optional[BrightDataClient] = None):
+    def __init__(
+            self, 
+            bright_data_client: Optional[BrightDataClient] = None,
+            gemini_model: Optional[GeminiModel] = None,
+        ):
 
         self.bright_data = bright_data_client or BrightDataClient()
-
+        self.gemini = gemini_model or GeminiModel()
         self.extractors = {
             "walmart": WalmartExtractor(self.bright_data),
             "amazon": AmazonExtractor(self.bright_data),
             "target": TargetExtractor(self.bright_data)
         }
-
-        self.selected_products: Dict[str, Product] = {}
+        self.selected_products = {}
 
     def _detect_store(self, url: str) -> str:
         if "walmart.com" in url:
@@ -29,25 +33,49 @@ class ProductService:
 
     async def discover_products(self, query: str, max_per_store: int = 3) -> Dict[str, List[Product]]:
         store_urls = await self.bright_data.discover(query)
+        all_products = []
         results: Dict[str, List[Product]] = {}
+        
+        
 
         for store, urls in store_urls.items():
             if store not in self.extractors:
                 continue
-
             extractor = self.extractors[store]
             products = []
-
             for url in urls[:max_per_store]:
                 try:
-                    product = await extractor.extract_product_info(url)
-                    products.append(product)
+                    prod_dict = await extractor.extract_product_info(url)
+                    prod_dict["id"] = str(uuid4())
+                    products.append(prod_dict)
+                    all_products.append(prod_dict)
                 except Exception as e:
                     print(f"Error extracting {store} product: {str(e)}")
-
             if products:
                 results[store] = products
 
+        # 2. Batch Gemini call for all products
+        gemini_specs = await self.gemini.batch_extract_specifications(all_products)
+        for prod, specs in zip(all_products, gemini_specs):
+            prod["specifications"] = specs
+
+        # 3. Convert dicts to Product models for API response
+        for store, products in results.items():
+            results[store] = [
+                Product(
+                    id=prod["id"],
+                    name=prod["name"],
+                    url=prod["url"],
+                    source=prod["source"],
+                    price=prod["price"],
+                    review_count=prod["review_count"],
+                    last_scraped=prod["last_scraped"],
+                    specifications=prod["specifications"],
+                    rating=prod["rating"],
+                    image_url=prod["image_url"],
+                )
+                for prod in products
+            ]
         return results
 
     async def add_custom_product(self, url: str) -> Product:

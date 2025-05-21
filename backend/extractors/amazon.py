@@ -1,16 +1,19 @@
 from backend.extractors.base import BaseProductExtractor
-from backend.api.schemas import Product
+from backend.models.product import Product
 
 class AmazonExtractor(BaseProductExtractor):
     async def extract_product_info(self, url: str) -> Product:
-        return Product(
-            name="Dummy Product",
-            url=url,
-            source="amazon",   
-            price=None,
-            rating=None,
-            review_count=None,
-            last_scraped=None,
-            specifications={}
-        )
+        return {
+            "id": None,
+            "name": "Dummy Amazon Product",
+            "url": url,
+            "source": "amazon",
+            "price": 99.99,
+            "review_count": 100,
+            "last_scraped": None,
+            "specifications_raw": "Dummy Amazon specs",
+            "specifications": {},
+            "rating": 4.5,
+            "image_url": "https://dummyimage.com/amazon.jpg",
+        }
 

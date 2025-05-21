@@ -1,3 +1,3 @@
-from .product import Product, ProductSpecification
+from .product import Product
 
-__all__ = ['Product', 'ProductSpecification']
+__all__ = ['Product']

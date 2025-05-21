@@ -4,15 +4,16 @@ from datetime import datetime
 
 
 class Product(BaseModel):
-    id: Optional[int] = None
+    id: Optional[str] = None
     name: str
     url: HttpUrl
     source: str
     price: Optional[float] = None
     review_count: Optional[int] = None
     last_scraped: Optional[datetime] = None
-    specifications: Optional[Dict] = None
+    specifications: Optional[Dict[str, str]] = None
     rating: Optional[float] = None
+    image_url: Optional[str] = None
 
     class Config:
         from_attributes = True
