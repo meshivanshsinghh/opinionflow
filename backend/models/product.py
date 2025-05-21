@@ -16,12 +16,10 @@ class ProductSpecification(BaseModel):
 
 
 class Product(BaseModel):
-    store: str
+    source: str
     url: HttpUrl
-    title: str
+    name: str
     price: float
-    image_url: Optional[HttpUrl]
-    description: Optional[str]
     specifications: Dict[str, ProductSpecification]
     rating: Optional[float]
     review_count: Optional[int]

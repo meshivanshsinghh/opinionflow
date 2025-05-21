@@ -1,0 +1,2 @@
+- /discover endpoint takes time to load. Maybe speed up the process. 
+- store queries in server to get the urls.

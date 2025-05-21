@@ -2,7 +2,6 @@ from typing import Dict, List, Optional
 from backend.services.brightdata import BrightDataClient
 from backend.extractors import WalmartExtractor, AmazonExtractor, TargetExtractor
 from backend.models.product import Product
-import asyncio
 from datetime import datetime
 
 
@@ -12,9 +11,9 @@ class ProductService:
         self.bright_data = bright_data_client or BrightDataClient()
 
         self.extractors = {
-            "walmart": WalmartExtractor(self.bright_data.proxy_url),
-            "amazon": AmazonExtractor(self.bright_data.proxy_url),
-            "target": TargetExtractor(self.bright_data.proxy_url)
+            "walmart": WalmartExtractor(self.bright_data),
+            "amazon": AmazonExtractor(self.bright_data),
+            "target": TargetExtractor(self.bright_data)
         }
 
         self.selected_products: Dict[str, Product] = {}
@@ -30,7 +29,7 @@ class ProductService:
 
     async def discover_products(self, query: str, max_per_store: int = 3) -> Dict[str, List[Product]]:
         store_urls = await self.bright_data.discover(query)
-        results = Dict[str, List[Product]] = {}
+        results: Dict[str, List[Product]] = {}
 
         for store, urls in store_urls.items():
             if store not in self.extractors:

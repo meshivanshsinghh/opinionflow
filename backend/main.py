@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import get_settings
-from backend.api.endpoints import products, history
+from backend.api.endpoints import products
 
 
 def create_application() -> FastAPI:
@@ -28,11 +28,13 @@ def create_application() -> FastAPI:
         prefix=f"{settings.API_V1_STR}/products",
         tags=["products"]
     )
-    app.include_router(
-        history.router,
-        prefix=f"{settings.API_V1_STR}/history",
-        tags=["history"]
-    )
+
+    # TODO: include history mechanism
+    # app.include_router(
+    #     history.router,
+    #     prefix=f"{settings.API_V1_STR}/history",
+    #     tags=["history"]
+    # )
 
     return app
 

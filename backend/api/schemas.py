@@ -9,9 +9,10 @@ class Product(BaseModel):
     url: HttpUrl
     source: str
     price: Optional[float] = None
-    rating: Optional[float] = None
     review_count: Optional[int] = None
     last_scraped: Optional[datetime] = None
+    specifications: Optional[Dict] = None
+    rating: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -22,5 +23,12 @@ class ProductQuery(BaseModel):
     stores: Optional[List[str]] = ["amazon", "walmart", "target"]
 
 
+class DiscoverUrlResponse(BaseModel):
+    products: Dict[str, List[str]]
+
 class DiscoverResponse(BaseModel):
     products: Dict[str, List[Product]]
+
+
+class SelectedResponse(BaseModel):
+    selected: Dict[str, str]

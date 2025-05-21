@@ -1,6 +1,15 @@
 from .base import BaseProductExtractor
-from backend.models.product import Product, ProductSpecification
-
+from backend.api.schemas import Product
 
 class TargetExtractor(BaseProductExtractor):
-    pass
+    async def extract_product_info(self, url: str) -> Product:
+        return Product(
+            name="Dummy Product",
+            url=url,
+            source="target",   
+            price=None,
+            rating=None,
+            review_count=None,
+            last_scraped=None,
+            specifications={}
+        )

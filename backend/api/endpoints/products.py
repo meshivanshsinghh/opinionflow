@@ -1,51 +1,52 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from backend.core.exceptions import OpinionFlowException
 from backend.services.product_service import ProductService
 from backend.core.config import Settings, get_settings
 from backend.models.product import Product
-from typing import Dict, List
-from backend.api.schemas import DiscoverResponse, ProductQuery, Product
+from backend.dependencies import get_product_service
+from backend.api.schemas import DiscoverResponse, DiscoverUrlResponse, ProductQuery, Product, SelectedResponse
 
-router = APIRouter()
+router = APIRouter(tags=["products"])
 
 
-@router.post("/discover/", response_model=DiscoverResponse)
+@router.post("/discover", response_model=DiscoverResponse)
 async def discover_products(
-    query: str,
+    payload: ProductQuery,
     settings: Settings = Depends(get_settings),
-    product_service: ProductService = Depends()
+    product_service: ProductService = Depends(get_product_service)
 ):
     try:
-        return await product_service.discover_products(
-            query,
+        products = await product_service.discover_products(
+            payload.query,
             max_per_store=settings.MAX_PRODUCTS_PER_STORE
         )
+        return {"products": products} 
     except OpinionFlowException as e:
         raise HTTPException(
             status_code=e.status_code,
-            detail={"message": e.message, "details": e.details}
+            detail=e.details
         )
 
 
-@router.post("/custom/", response_model=Product)
+@router.post("/custom", response_model=Product)
 async def add_custom_product(
-    url: str,
-    product_service: ProductService = Depends()
+    url: str = Body(..., embed=True),
+    product_service: ProductService = Depends(get_product_service)
 ):
     try:
         return await product_service.add_custom_product(url)
     except OpinionFlowException as e:
         raise HTTPException(
             status_code=e.status_code,
-            detail={"message": e.message, "details": e.details}
+            detail=e.details
         )
 
 
-@router.post("/{store}/select/{product_id}", response_model=ProductQuery)
+@router.post("/{store}/select/{product_id}", response_model=SelectedResponse)
 async def select_product(
     store: str,
     product_id: str,
-    product_service: ProductService = Depends()
+    product_service: ProductService = Depends(get_product_service)
 ):
     """
     Select a product for a specific store.
@@ -56,5 +57,5 @@ async def select_product(
     except OpinionFlowException as e:
         raise HTTPException(
             status_code=e.status_code,
-            detail={"message": e.message, "details": e.details}
+            detail=e.details
         )
