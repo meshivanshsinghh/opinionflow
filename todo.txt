@@ -1,2 +1,4 @@
 - /discover endpoint takes time to load. Maybe speed up the process. 
-- store queries in server to get the urls.
+- store queries in server to get the urls directly.
+- providing a dropdown for user to select max urls per source while executing their query.
+

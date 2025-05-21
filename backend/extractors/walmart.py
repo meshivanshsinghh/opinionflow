@@ -35,12 +35,9 @@ class WalmartExtractor(BaseProductExtractor):
             reviews_block = soup.find("div", {"data-testid": "reviews-and-ratings"})
             if reviews_block:
                 text = reviews_block.get_text(" ", strip=True)
-                # Try to match "4.3 stars" or "4 stars"
                 rating_match = re.search(r"([0-5](?:\.\d)?)\s*stars?", text)
-                # If not found, try to match "(4.3)" or "(4)"
                 if not rating_match:
                     rating_match = re.search(r"\((\d(?:\.\d)?)\)", text)
-                # If still not found, try to match just a number at the start
                 if not rating_match:
                     rating_match = re.search(r"\b([0-5](?:\.\d)?)\b", text)
                 if rating_match:
@@ -48,11 +45,9 @@ class WalmartExtractor(BaseProductExtractor):
                         rating = float(rating_match.group(1))
                     except Exception:
                         rating = None
-                # Review count
                 count_match = re.search(r"out of\s+(\d+)", text)
                 if not count_match:
-                    # Try to match "438 ratings" or "438 reviews"
-                    count_match = re.search(r"(\d+)\s+(?:ratings|reviews)", text)
+                     count_match = re.search(r"(\d+)\s+(?:ratings|reviews)", text)
                 if count_match:
                     review_count = int(count_match.group(1))
 
@@ -61,8 +56,14 @@ class WalmartExtractor(BaseProductExtractor):
             img_el = soup.find("img", {"data-testid": "hero-image"})
             if img_el:
                 image_url = img_el.get("src")
+            if not image_url:
+                # Fallback: look for media-thumbnail
+                thumb_div = soup.find("div", {"data-testid": "media-thumbnail"})
+                if thumb_div:
+                    img_tag = thumb_div.find("img")
+                    if img_tag:
+                        image_url = img_tag.get("src")
 
-            # About this item (raw spec text)
             about_section = soup.find("h2", string=re.compile("About this item", re.I))
             spec_text = ""
             if about_section:
@@ -71,6 +72,11 @@ class WalmartExtractor(BaseProductExtractor):
                     ul = parent.find("ul")
                     if ul:
                         spec_text = "\n".join(li.get_text(strip=True) for li in ul.find_all("li"))
+            
+            if rating is None:
+                rating = 0.0
+            if review_count is None:
+                review_count = 0
             
             return {
                 "id": None,

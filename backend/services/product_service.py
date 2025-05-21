@@ -75,6 +75,7 @@ class ProductService:
                     image_url=prod["image_url"],
                 )
                 for prod in products
+                if prod.get("name") and prod.get("url")
             ]
         return results
 

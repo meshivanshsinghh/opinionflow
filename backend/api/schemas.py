@@ -9,10 +9,10 @@ class Product(BaseModel):
     url: HttpUrl
     source: str
     price: Optional[float] = None
-    review_count: Optional[int] = None
+    review_count: int = 0
     last_scraped: Optional[datetime] = None
     specifications: Optional[Dict[str, str]] = None
-    rating: Optional[float] = None
+    rating: float = 0.0
     image_url: Optional[str] = None
 
     class Config:

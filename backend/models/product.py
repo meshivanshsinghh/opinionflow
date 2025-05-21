@@ -10,23 +10,11 @@ class Product(BaseModel):
     name: str
     price: Optional[float]
     specifications: Dict[str, str] = {}
-    rating: Optional[float]
-    review_count: Optional[int]
+    rating: float = 0.0
+    review_count: int = 0
     image_url: Optional[str] = None
     is_selected: bool = False
     last_scraped: Optional[datetime] = None
-
-    @field_validator('price')
-    def price_must_be_positive(cls, v):
-        if v < 0:
-            raise ValueError('Price must be positive')
-        return v
-
-    @field_validator('rating')
-    def rating_must_be_in_range(cls, v):
-        if v is not None and not (0 <= v <= 5):
-            raise ValueError('Rating mustbe between 0 and 5')
-        return v
 
     class Config:
         json_encoders = {
