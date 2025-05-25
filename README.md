@@ -7,7 +7,7 @@ Bright Data Real‑Time AI Agents Challenge (May 2025)
 
 ## 1 · Why OpinionFlow?
 
-Shoppers drown in thousands of fragmented reviews. OpinionFlow turns that chaos into clarity: it scrapes fresh reviews from **Amazon, Walmart, and Target** in real‑time, distills crowd sentiment with AI, and surfaces instant, source‑cited insights—so anyone can decide with confidence.
+Shoppers drown in thousands of fragmented reviews. OpinionFlow turns that chaos into clarity: it scrapes fresh reviews from **Amazon and Walmart** in real‑time, distills crowd sentiment with AI, and surfaces instant, source‑cited insights—so anyone can decide with confidence.
 
 Powered by **Bright Data MCP**, FastAPI, PGVector, and Retrieval‑Augmented Generation (RAG), OpinionFlow shows judges how reliable web data super‑charges large‑language‑model reasoning.
 
@@ -15,14 +15,14 @@ Powered by **Bright Data MCP**, FastAPI, PGVector, and Retrieval‑Augmented Ge
 
 ## 2 · Features (MVP)
 
-| 💎 Feature                 | What you see                                                              | Tech behind it                                           |
-| -------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------- |
-| **Instant Answer Box**     | One‑paragraph, LLM‑grounded summary answering your free‑form question.    | LangChain RAG + Llama‑3, citations linked to review IDs. |
-| **Overall Sentiment Card** | "⭐ 4.3 (82 % positive)" metric with color cue.                           | Aggregated star ratings / Text sentiment.                |
-| **Top Pros / Cons**        | Three key positives & negatives.                                          | Gemini JSON formatting + frequency analysis.             |
-| **Store Tabs**             | Per‑store breakdown for Amazon / Walmart / Target plus "All Sources" tab. | Separate scrape & analysis pipelines.                    |
-| **Aspect Mini‑Charts**     | Dynamic bar charts (battery, comfort, longevity …) per product category.  | YAML aspect map + AI scoring.                            |
-| **Source Explorer**        | Expandable snippets with outbound review links.                           | PGVector similarity search.                              |
+| 💎 Feature                 | What you see                                                             | Tech behind it                                           |
+| -------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------- |
+| **Instant Answer Box**     | One‑paragraph, LLM‑grounded summary answering your free‑form question.   | LangChain RAG + Llama‑3, citations linked to review IDs. |
+| **Overall Sentiment Card** | "⭐ 4.3 (82 % positive)" metric with color cue.                          | Aggregated star ratings / Text sentiment.                |
+| **Top Pros / Cons**        | Three key positives & negatives.                                         | Gemini JSON formatting + frequency analysis.             |
+| **Store Tabs**             | Per‑store breakdown for Amazon / Walmart plus "All Sources" tab.         | Separate scrape & analysis pipelines.                    |
+| **Aspect Mini‑Charts**     | Dynamic bar charts (battery, comfort, longevity …) per product category. | YAML aspect map + AI scoring.                            |
+| **Source Explorer**        | Expandable snippets with outbound review links.                          | PGVector similarity search.                              |
 
 ---
 
@@ -106,7 +106,7 @@ OLLAMA_BASE_URL=
 2. **Implement** discover → scrape → extract for Amazon.
 3. **Store** reviews & embeddings; test PGVector search.
 4. **Build** analysis chain (pros/cons, sentiment, RAG answer).
-5. **Add** Walmart & Target extractors.
+5. **Add** Walmart & Amazon extractors.
 6. **Wire** Streamlit UI panels.
 7. **Deploy** to Cloud Run; attach Secret Manager creds.
 8. **Polish** docs, add screenshots, record demo.

@@ -1,69 +1,48 @@
-import os
-from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException
-from typing import List, Dict, Any, Optional
-import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from backend.core.config import get_settings
+from backend.api.endpoints import products
+from backend.api.endpoints import reviews
 
-app = FastAPI(title="OpinionFlow API")
+def create_application() -> FastAPI:
+    settings = get_settings()
 
-
-class ProductRequest(BaseModel):
-    product: str
-    max_reviews: int = 150
-
-
-class ReviewResponse(BaseModel):
-    id: str
-    source: str
-    rating: float
-    text: str
-
-
-class SentimentSummary(BaseModel):
-    overall: str
-    pros: List[str]
-    cons: List[str]
-
-
-class AspectSentiment(BaseModel):
-    aspect: str
-    sentiment: float
-    count: int
-
-
-# analysis response
-class AnalysisResponse(BaseModel):
-    product: str
-    summary: SentimentSummary
-    aspect: List[AspectSentiment]
-    reviews: List[ReviewResponse]
-    store_counts: Dict[str, int]
-
-
-@app.post("/analyze", response_model=AnalysisResponse)
-async def analyze_product(request: ProductRequest):
-    """
-    Analyzing product reviews acorss multiple e-commerce stores.
-    It returns sentiment summary, aspect-based analysis, and review snippets. 
-    """
-
-    if not request.product.strip():
-        raise HTTPException(
-            status_code=400, detail="Product query cannot be empty")
-
-    return AnalysisResponse(
-        product=request.product,
-        summary=SentimentSummary(
-            overall="TODO",
-            pros=["TODO"],
-            cons=["TODO"]
-        ),
-        aspect=[
-            AspectSentiment(aspect="quality", sentiment=0.8, count=1)
-        ],
-        reviews=[ReviewResponse(id="1", source="test", text="Placeholder")],
-        store_counts={"amazon": 0, "walmart": 0, "target": 0}
+    app = FastAPI(
+        title="OpinionFlow API",
+        description="Real-time product review analysis across multiple stores",
+        version="1.0.0"
     )
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Set up CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Include routers
+    app.include_router(
+        products.router,
+        prefix=f"{settings.API_V1_STR}/products",
+        tags=["products"]
+    )
+
+    app.include_router(
+        reviews.router, 
+        prefix=f"{settings.API_V1_STR}/reviews",
+        tags=["reviews"]
+    )
+    
+    # TODO: include history mechanism
+    # app.include_router(
+    #     history.router,
+    #     prefix=f"{settings.API_V1_STR}/history",
+    #     tags=["history"]
+    # )
+
+    return app
+
+
+app = create_application()
