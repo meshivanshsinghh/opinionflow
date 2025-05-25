@@ -1,6 +1,7 @@
+import asyncio
 from typing import Dict, List, Optional
 from backend.services.brightdata import BrightDataClient
-from backend.extractors import WalmartExtractor, AmazonExtractor, TargetExtractor
+from backend.extractors import WalmartExtractor, AmazonExtractor
 from backend.models.product import Product
 from datetime import datetime
 from backend.services.gemini import GeminiModel
@@ -18,7 +19,7 @@ class ProductService:
         self.extractors = {
             "walmart": WalmartExtractor(self.bright_data),
             "amazon": AmazonExtractor(self.bright_data),
-            "target": TargetExtractor(self.bright_data)
+            # "target": TargetExtractor(self.bright_data)
         }
         self.selected_products = {}
 
@@ -27,32 +28,40 @@ class ProductService:
             return "walmart"
         elif "amazon.com" in url:
             return "amazon"
-        elif "target.com" in url:
-            return "target"
+        # elif "target.com" in url:
+        #     return "target"
         raise ValueError("Unsupported store URL")
 
     async def discover_products(self, query: str, max_per_store: int = 3) -> Dict[str, List[Product]]:
         store_urls = await self.bright_data.discover(query)
         all_products = []
         results: Dict[str, List[Product]] = {}
-        
-        
+
+        # Prepare all extraction tasks
+        extraction_tasks = []
+        task_metadata = []
 
         for store, urls in store_urls.items():
             if store not in self.extractors:
                 continue
             extractor = self.extractors[store]
-            products = []
             for url in urls[:max_per_store]:
-                try:
-                    prod_dict = await extractor.extract_product_info(url)
-                    prod_dict["id"] = str(uuid4())
-                    products.append(prod_dict)
-                    all_products.append(prod_dict)
-                except Exception as e:
-                    print(f"Error extracting {store} product: {str(e)}")
-            if products:
-                results[store] = products
+                extraction_tasks.append(extractor.extract_product_info(url))
+                task_metadata.append((store, url))
+
+        # Run all extractions concurrently (once, after collecting all tasks)
+        extraction_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
+
+        # Organize results by store
+        for (store, url), prod_dict in zip(task_metadata, extraction_results):
+            if isinstance(prod_dict, Exception):
+                print(f"Error extracting {store} product: {prod_dict}")
+                continue
+            prod_dict["id"] = str(uuid4())
+            if store not in results:
+                results[store] = []
+            results[store].append(prod_dict)
+            all_products.append(prod_dict)
 
         # 2. Batch Gemini call for all products
         gemini_specs = await self.gemini.batch_extract_specifications(all_products)

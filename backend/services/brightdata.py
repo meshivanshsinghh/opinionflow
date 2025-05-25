@@ -7,6 +7,7 @@ import re
 from typing import Dict, List
 from urllib.parse import quote_plus
 import json
+import asyncio
 
 class BrightDataClient:
 
@@ -31,7 +32,6 @@ class BrightDataClient:
         # browser api credentials
         self.browserapi_username = settings.BRIGHT_DATA_BROWSER_API_USERNAME
         self.browserapi_password = settings.BRIGHT_DATA_BROWSER_API_PASSWORD
-
         
     @property
     def auth(self):
@@ -53,9 +53,9 @@ class BrightDataClient:
                     'format': format
                 }
             )
-            print(f"Response status: {response.status_code}")  # Debug log
+            print(f"Response status: {response.status_code}")  
             if response.status_code != 200:
-                print(f"Error response: {response.text}")  # Debug log
+                print(f"Error response: {response.text}") 
                 
             response.raise_for_status()
             return response.text
@@ -66,64 +66,61 @@ class BrightDataClient:
         stores = {
             "amazon": f"{product} site:amazon.com",
             "walmart": f"{product} site:walmart.com",
-            "target": f"{product} site:target.com"
+            # "target": f"{product} site:target.com"
         }
 
         patterns = {
             "amazon": r'amazon\.com.*/(dp|gp/product)/[A-Z0-9]{10}',
             "walmart": r'walmart\.com/ip/[^/]+/\d+',
-            "target": r'target\.com/p/[^/]+/-/A-\d+'
+            # "target": r'target\.com/p/[^/]+/-/A-\d+'
         }
 
-        results = {}
-
-        for store_name, query in stores.items():
+        async def search_store(store_name, query):
             try:
-                # url encode
                 encoded_query = quote_plus(query)
                 search_url = f"https://www.google.com/search?q={encoded_query}"
                 print(f"Searching for {store_name} products: {search_url}")
-                
-                # Make SERP API request
+
                 response_text = await self._make_request(
                     url=search_url,
                     zone=self.serp_zone,
                     format='json'
                 )
-                
-                # Parse JSON response
-                try:
-                    response_data = json.loads(response_text)
-                    # Extract HTML from body
-                    html_content = response_data.get('body', '')
-                    
-                    # Parse HTML with BeautifulSoup
-                    soup = BeautifulSoup(html_content, "html.parser")
-                    all_links = [
-                        a.get('href') for a in soup.select('a[href]')
-                        if a.get('href') and a.get('href').startswith('http')
-                    ]
 
-                    # Filter and clean product URLs
-                    product_urls = []
-                    for url in all_links:
-                        if re.search(patterns.get(store_name, ''), url):
-                            clean_url = url.split('&utm_')[0].split('?utm_')[0]
-                            if clean_url not in product_urls:
-                                product_urls.append(clean_url)
+                response_data = json.loads(response_text)
+                html_content = response_data.get('body', '')
 
-                    results[store_name] = product_urls[:3]
-                    print(f"Found {len(product_urls)} URLs for {store_name}")
+                soup = BeautifulSoup(html_content, "html.parser")
+                all_links = [
+                    a.get('href') for a in soup.select('a[href]')
+                    if a.get('href') and a.get('href').startswith('http')
+                ]
 
-                except json.JSONDecodeError as e:
-                    print(f"Error parsing JSON response: {str(e)}")
-                    raise ExtractionError(store_name, query, f"JSON parse error: {str(e)}")
+                product_urls = []
+                for url in all_links:
+                    if re.search(patterns.get(store_name, ''), url):
+                        clean_url = url.split('&utm_')[0].split('?utm_')[0]
+                        if clean_url not in product_urls:
+                            product_urls.append(clean_url)
 
+                print(f"Found {len(product_urls)} URLs for {store_name}")
+                return (store_name, product_urls[:3])
             except Exception as e:
                 print(f"Error discovering {store_name} products: {str(e)}")
-                raise ExtractionError(store_name, query, str(e))
+                return (store_name, [])
 
-        return results
+        # Prepare all search tasks
+        tasks = [
+            search_store(store_name, query)
+            for store_name, query in stores.items()
+        ]
+
+        # Run all searches concurrently
+        results = await asyncio.gather(*tasks)
+
+        # Build the final results dict
+        return {store: urls for store, urls in results}
+
 
     async def get_product_page(self, url: str) -> str:
         """Get product page content using Web Unlocker API"""

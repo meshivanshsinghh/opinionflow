@@ -21,7 +21,7 @@ class Product(BaseModel):
 
 class ProductQuery(BaseModel):
     query: str
-    stores: Optional[List[str]] = ["amazon", "walmart", "target"]
+    stores: Optional[List[str]] = ["amazon", "walmart"]
 
 
 class DiscoverUrlResponse(BaseModel):

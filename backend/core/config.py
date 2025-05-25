@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     BRIGHT_DATA_BROWSER_API_USERNAME: str
     BRIGHT_DATA_BROWSER_API_PASSWORD: str
     
+    # Pinecone configuration
+    PINECONE_API_KEY: str
+    PINECONE_ENVIRONMENT: str
+    PINECONE_DISCOVERY_INDEX: str
+    PINECONE_REVIEWS_INDEX: str
+    
+    # cache configuration
+    CACHE_EXPIRY_DAYS: int = 7
+    DISCOVERY_SIMILARITY_THRESHOLD: float = 0.85
+    
     BRIGHT_DATA_SERP_ZONE: str
     BRIGHT_DATA_WEBUNLOCKER_ZONE: str
 
