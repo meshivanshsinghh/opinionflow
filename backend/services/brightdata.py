@@ -61,7 +61,7 @@ class BrightDataClient:
             return response.text
 
     # discovering urls
-    async def discover(self, product: str) -> Dict[str, List[str]]:
+    async def discover(self, product: str, max_per_store: int = 5) -> Dict[str, List[str]]:
         """Use SERP API to discover product URLs"""
         stores = {
             "amazon": f"{product} site:amazon.com",
@@ -104,7 +104,8 @@ class BrightDataClient:
                             product_urls.append(clean_url)
 
                 print(f"Found {len(product_urls)} URLs for {store_name}")
-                return (store_name, product_urls[:3])
+                return (store_name, product_urls[:max_per_store])
+            
             except Exception as e:
                 print(f"Error discovering {store_name} products: {str(e)}")
                 return (store_name, [])
@@ -123,7 +124,6 @@ class BrightDataClient:
 
 
     async def get_product_page(self, url: str) -> str:
-        """Get product page content using Web Unlocker API"""
         try:
             response_text = await self._make_request(
                 url=url,

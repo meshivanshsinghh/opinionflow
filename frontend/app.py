@@ -18,7 +18,7 @@ with col1:
     
 with col2:
     if "max_entries" not in st.session_state:
-        st.session_state["max_entries"] = 3
+        st.session_state["max_entries"] = 5
         
 # max entries popup
 # Todo: Not clear after selecting

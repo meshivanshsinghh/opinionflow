@@ -8,21 +8,26 @@ from pinecone import Pinecone, ServerlessSpec
 from backend.core.config import get_settings
 from backend.utils.retry import with_retry
 
-class PineconeService:
+class PineconeService: 
     def __init__(self):
         self.settings = get_settings()
         self.pc = Pinecone(api_key=self.settings.PINECONE_API_KEY)
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         self.embedding_dimension = 384
+        self._indexes_initialized = False
         
-        # Initialize indexes
-        asyncio.create_task(self._ensure_indexes_exist())
-    
+        # initializing indexes
+        # asyncio.create_task(self._ensure_indexes_exist())
+        
     async def _ensure_indexes_exist(self):
-        """Create indexes if they don't exist"""
+        
+        if self._indexes_initialized:
+            return
+        
         existing_indexes = self.pc.list_indexes().names()
         
-        # Discovery cache index
+        
+        # discovery cache index
         if self.settings.PINECONE_DISCOVERY_INDEX not in existing_indexes:
             self.pc.create_index(
                 name=self.settings.PINECONE_DISCOVERY_INDEX,
@@ -33,8 +38,8 @@ class PineconeService:
                     region=self.settings.PINECONE_ENVIRONMENT
                 )
             )
-        
-        # Reviews index
+            
+        # reviews index 
         if self.settings.PINECONE_REVIEWS_INDEX not in existing_indexes:
             self.pc.create_index(
                 name=self.settings.PINECONE_REVIEWS_INDEX,
@@ -45,28 +50,36 @@ class PineconeService:
                     region=self.settings.PINECONE_ENVIRONMENT
                 )
             )
-    
-    def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text"""
+        
+        self._indexes_initialized = True
+            
+    # generating embedding
+    def _generate_embedding(self, text:str) -> List[float]:
         return self.embedding_model.encode(text).tolist()
     
-    def _is_expired(self, expires_at: str) -> bool:
-        """Check if cache entry is expired"""
-        expiry_time = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-        return datetime.now(expiry_time.tzinfo) > expiry_time
+    def _is_expired(self, expires_at) -> bool: 
+        if isinstance(expires_at, (int, float)):
+            # Handle numeric timestamp
+            return datetime.now().timestamp() > expires_at
+        else:
+            # Handle ISO string (fallback)
+            expiry_time = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            return datetime.now(expiry_time.tzinfo) > expiry_time
     
     @with_retry(max_retries=3)
     async def search_discovery_cache(self, query: str) -> Optional[Dict[str, Any]]:
-        """Search for cached discovery results"""
+        await self._ensure_indexes_exist()
         try:
             query_embedding = self._generate_embedding(query)
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
+            current_timestamp = datetime.now().timestamp()
+            
             results = index.query(
                 vector=query_embedding,
-                top_k=1,
+                top_k = 1,
                 include_metadata=True,
-                filter={"expires_at": {"$gt": datetime.now().isoformat()}}
+                 filter={"expires_at": {"$gt": current_timestamp}}
             )
             
             if results.matches and results.matches[0].score >= self.settings.DISCOVERY_SIMILARITY_THRESHOLD:
@@ -77,20 +90,23 @@ class PineconeService:
                         "cached_at": match.metadata["timestamp"],
                         "similarity_score": match.score
                     }
-            
+
             return None
             
-        except Exception as e:
+        except Exception as e: 
             print(f"Error searching discovery cache: {e}")
             return None
     
     @with_retry(max_retries=3)
     async def cache_discovery_results(self, query: str, products: Dict[str, List[Dict]]) -> str:
-        """Cache discovery results"""
+        await self._ensure_indexes_exist()
         try:
             query_embedding = self._generate_embedding(query)
             cache_id = str(uuid.uuid4())
-            expires_at = (datetime.now() + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).isoformat()
+            
+            current_time = datetime.now()
+            expires_at_timestamp = (current_time + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp()
+        
             
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
@@ -99,8 +115,8 @@ class PineconeService:
                 "values": query_embedding,
                 "metadata": {
                     "search_query": query,
-                    "timestamp": datetime.now().isoformat(),
-                    "expires_at": expires_at,
+                    "timestamp": current_time.isoformat(),  # Keep as string for display
+                    "expires_at": expires_at_timestamp,     # Store as number for filtering
                     "discovered_products": json.dumps(products),
                     "product_count": sum(len(prods) for prods in products.values())
                 }
@@ -111,10 +127,11 @@ class PineconeService:
         except Exception as e:
             print(f"Error caching discovery results: {e}")
             raise
-    
+        
+     
     @with_retry(max_retries=3)
     async def store_reviews(self, reviews: List[Dict], session_id: str, product_id: str, store: str) -> List[str]:
-        """Store product reviews in Pinecone"""
+        await self._ensure_indexes_exist()
         try:
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
             vectors = []
@@ -131,21 +148,24 @@ class PineconeService:
                 review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
                 embedding = self._generate_embedding(review_content)
                 
+                # Clean metadata - ensure no null values
+                metadata = {
+                    "session_id": session_id,
+                    "product_id": product_id,
+                    "product_name": review.get("product_name") or "",  # Convert None to empty string
+                    "store": store,
+                    "review_text": review.get("review_text") or "",
+                    "title": review.get("title") or "",  # Convert None to empty string
+                    "rating": review.get("rating") or 0,
+                    "review_date": review.get("review_date") or "",
+                    "helpful_votes": review.get("helpful_votes") or 0,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
                 vectors.append({
                     "id": review_id,
                     "values": embedding,
-                    "metadata": {
-                        "session_id": session_id,
-                        "product_id": product_id,
-                        "product_name": review.get("product_name", ""),
-                        "store": store,
-                        "review_text": review.get("review_text", ""),
-                        "title": review.get("title", ""),
-                        "rating": review.get("rating", 0),
-                        "review_date": review.get("review_date", ""),
-                        "helpful_votes": review.get("helpful_votes", 0),
-                        "timestamp": datetime.now().isoformat()
-                    }
+                    "metadata": metadata
                 })
             
             # Batch upsert (100 vectors at a time)
@@ -161,7 +181,7 @@ class PineconeService:
     
     @with_retry(max_retries=3)
     async def search_reviews_by_session(self, session_id: str, question: str, top_k: int = 20) -> List[Dict]:
-        """Search reviews for a specific session"""
+        await self._ensure_indexes_exist()
         try:
             question_embedding = self._generate_embedding(question)
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
@@ -190,20 +210,20 @@ class PineconeService:
             return []
     
     async def cleanup_expired_cache(self):
-        """Remove expired cache entries"""
+        await self._ensure_indexes_exist()
         try:
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
             # Query for expired entries
             current_time = datetime.now().isoformat()
             results = index.query(
-                vector=[0] * self.embedding_dimension,  # Dummy vector
+                vector=[0] * self.embedding_dimension,
                 top_k=10000,
                 include_metadata=True,
                 filter={"expires_at": {"$lt": current_time}}
             )
             
-            # Delete expired entries
+             
             if results.matches:
                 expired_ids = [match.id for match in results.matches]
                 index.delete(ids=expired_ids)
@@ -211,3 +231,69 @@ class PineconeService:
                 
         except Exception as e:
             print(f"Error cleaning up expired cache: {e}") 
+            
+    @with_retry(max_retries=3)
+    async def search_review_cache(self, cache_key: str) -> Optional[Dict[str, List[Dict]]]:
+        await self._ensure_indexes_exist()
+        try:
+            cache_embedding = self._generate_embedding(cache_key)
+            index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
+            
+            results = index.query(
+                vector=cache_embedding,
+                top_k=1,
+                include_metadata=True,
+                filter={"cache_key": cache_key, "is_cache": True}
+            )
+            
+            if results.matches and results.matches[0].score > 0.95:
+                cached_data = results.matches[0].metadata.get("cached_reviews")
+                if cached_data:
+                    return json.loads(cached_data)
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error searching review cache: {e}")
+            return None
+
+    @with_retry(max_retries=3)
+    async def cache_review_results(self, cache_key: str, reviews: Dict[str, List[Dict]]) -> str:
+        await self._ensure_indexes_exist()
+        try:
+            cache_id = str(uuid.uuid4())
+            cache_embedding = self._generate_embedding(cache_key)
+            index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
+            
+            # Clean the reviews data before JSON serialization
+            cleaned_reviews = {}
+            for store, store_reviews in reviews.items():
+                cleaned_reviews[store] = [
+                    {
+                        "review_text": review.get("review_text") or "",
+                        "title": review.get("title") or "",
+                        "rating": review.get("rating") or 0,
+                        "review_date": review.get("review_date") or "",
+                        "helpful_votes": review.get("helpful_votes") or 0,
+                        "product_name": review.get("product_name") or ""
+                    }
+                    for review in store_reviews
+                ]
+            
+            index.upsert(vectors=[{
+                "id": cache_id,
+                "values": cache_embedding,
+                "metadata": {
+                    "cache_key": cache_key,
+                    "is_cache": True,
+                    "cached_reviews": json.dumps(cleaned_reviews),
+                    "timestamp": datetime.now().isoformat(),
+                    "expires_at": (datetime.now() + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp()
+                }
+            }])
+            
+            return cache_id
+            
+        except Exception as e:
+            print(f"Error caching review results: {e}")
+            raise

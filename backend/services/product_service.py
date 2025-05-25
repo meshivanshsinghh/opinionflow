@@ -6,16 +6,20 @@ from backend.models.product import Product
 from datetime import datetime
 from backend.services.gemini import GeminiModel
 from uuid import uuid4
+from backend.services.pinecone_service import PineconeService
 
 class ProductService:
     def __init__(
             self, 
             bright_data_client: Optional[BrightDataClient] = None,
             gemini_model: Optional[GeminiModel] = None,
+            pinecone_service: Optional[PineconeService] = None
         ):
 
         self.bright_data = bright_data_client or BrightDataClient()
         self.gemini = gemini_model or GeminiModel()
+        self.pinecone = pinecone_service or PineconeService()
+        
         self.extractors = {
             "walmart": WalmartExtractor(self.bright_data),
             "amazon": AmazonExtractor(self.bright_data),
@@ -32,8 +36,15 @@ class ProductService:
         #     return "target"
         raise ValueError("Unsupported store URL")
 
-    async def discover_products(self, query: str, max_per_store: int = 3) -> Dict[str, List[Product]]:
-        store_urls = await self.bright_data.discover(query)
+    async def discover_products(self, query: str, max_per_store: int = 5) -> Dict[str, List[Product]]:
+        # checking cache first
+        cached_results = await self.pinecone.search_discovery_cache(query)
+        if cached_results:
+            print(f"Cache hit for query: {query} (similarity: {cached_results['similarity_score']:.3f})")
+            return self._convert_cached_to_products(cached_results["discovered_products"])
+
+        # doing a fresh discovery
+        store_urls = await self.bright_data.discover(query, max_per_store)
         all_products = []
         results: Dict[str, List[Product]] = {}
 
@@ -57,6 +68,8 @@ class ProductService:
             if isinstance(prod_dict, Exception):
                 print(f"Error extracting {store} product: {prod_dict}")
                 continue
+            
+            
             prod_dict["id"] = str(uuid4())
             if store not in results:
                 results[store] = []
@@ -86,7 +99,30 @@ class ProductService:
                 for prod in products
                 if prod.get("name") and prod.get("url")
             ]
+            
+        # caching the results
+        products_for_cache = {}
+        
+        # 4. Cache the results
+        for store, product_dicts in results.items():
+            products_for_cache[store] = [
+                {
+                    "id": prod.id,
+                    "name": prod.name,
+                    "url": str(prod.url),
+                    "source": prod.source,
+                    "price": prod.price,
+                    "review_count": prod.review_count,
+                    "rating": prod.rating,
+                    "image_url": prod.image_url,
+                    "specifications": prod.specifications
+                }
+                for prod in product_dicts
+            ]
+        
+        await self.pinecone.cache_discovery_results(query, products_for_cache)
         return results
+
 
     async def add_custom_product(self, url: str) -> Product:
         try:
@@ -125,3 +161,23 @@ class ProductService:
         updated_product.is_selected = product.is_selected
 
         return updated_product
+    
+    
+    def _convert_cached_to_products(self, cached_products: Dict[str, List[Dict]]) -> Dict[str, List[Product]]:
+        results = {}
+        for store, products in cached_products.items():
+            results[store] = [
+                Product(
+                    id=prod["id"],
+                    name=prod["name"],
+                    url=prod["url"],
+                    source=prod["source"],
+                    price=prod["price"],
+                    review_count=prod["review_count"],
+                    rating=prod["rating"],
+                    image_url=prod["image_url"],
+                    specifications=prod["specifications"]
+                )
+                for prod in products
+            ]
+        return results

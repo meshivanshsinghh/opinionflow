@@ -32,3 +32,12 @@ class GeminiModel:
         except Exception as e:
             print("Gemini JSON parse error:", e)
             return [{} for _ in products]
+
+    async def generate_content(self, prompt: str) -> any:
+        """Generate content using Gemini model"""
+        try:
+            response = self.model.generate_content(prompt)
+            return response
+        except Exception as e:
+            print(f"Gemini generation error: {e}")
+            raise

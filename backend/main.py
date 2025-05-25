@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import get_settings
 from backend.api.endpoints import products
-
+from backend.api.endpoints import reviews
 
 def create_application() -> FastAPI:
     settings = get_settings()
@@ -29,6 +29,12 @@ def create_application() -> FastAPI:
         tags=["products"]
     )
 
+    app.include_router(
+        reviews.router, 
+        prefix=f"{settings.API_V1_STR}/reviews",
+        tags=["reviews"]
+    )
+    
     # TODO: include history mechanism
     # app.include_router(
     #     history.router,

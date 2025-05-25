@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     MAX_RETRIES: int = 3
     RETRY_DELAY: float = 1.0
-    MAX_PRODUCTS_PER_STORE: int = 3
+    MAX_PRODUCTS_PER_STORE: int = 5
     MAX_REVIEWS_PER_STORE: int = 100
     REQUEST_TIMEOUT: int = 30
 
