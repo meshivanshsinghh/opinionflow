@@ -4,6 +4,7 @@ from core.config import get_settings
 from api.endpoints import products
 from api.endpoints import reviews
 from api.endpoints import analysis
+import os
 
 
 def create_application() -> FastAPI:
@@ -15,14 +16,15 @@ def create_application() -> FastAPI:
         version="1.0.0"
     )
 
-    # Set up CORS
+    # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
             "http://localhost:3000",
-            "https://your-nextjs-app.vercel.app",
-            "https://*.vercel.app"
+            "https://opinionflow-ruby.vercel.app",  
+            "https://opinionflowproject.netlify.app",
         ],
+        allow_origin_regex=r"https://.*\.netlify\.app",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -47,8 +49,13 @@ def create_application() -> FastAPI:
         tags=["analysis"]
     )
     
-
     return app
 
 
 app = create_application()
+
+# Add this for debugging
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -169,7 +169,7 @@ const ChatInterface = ({ onChat, selectedProducts }) => {
               <div className="text-center py-8">
                 <Bot className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-600 mb-2">
-                  Hello! I'm ready to answer questions about your selected
+                  Hello! I am ready to answer questions about your selected
                   products:
                 </p>
                 <p className="text-sm text-gray-500 font-medium">

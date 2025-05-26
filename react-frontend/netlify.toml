@@ -1,0 +1,13 @@
+[build]
+  command   = "npm run build"
+  publish   = ".next"
+
+# Install Netlify’s runtime for Next.js
+[[plugins]]
+  package = "@netlify/next"
+
+# Optional: forward any unmatched route to Next.js
+[[redirects]]
+  from = "/*"
+  to   = "/.netlify/functions/next"
+  status = 200

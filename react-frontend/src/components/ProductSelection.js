@@ -1,6 +1,7 @@
 import React from "react";
 import { Star, ShoppingBag, Loader2, BarChart3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import Image from "next/image";
 
 const ProductCard = ({ product, store, isSelected, onSelect }) => {
   const displayName =
@@ -50,14 +51,17 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
       <div className="flex items-center gap-4">
         {/* Product Image */}
         <div className="flex-shrink-0 w-20 h-20 bg-gray-100 rounded-lg overflow-hidden">
-          <img
+          <Image
             src={imageUrl}
             alt={displayName}
+            width={80}
+            height={80}
             className="w-full h-full object-contain"
             onError={(e) => {
               e.target.src =
                 "https://via.placeholder.com/100x100?text=No+Image";
             }}
+            unoptimized={true}
           />
         </div>
 
