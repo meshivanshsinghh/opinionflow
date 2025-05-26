@@ -15,7 +15,8 @@ import ProductSelection from "./ProductSelection";
 import AnalysisResults from "./AnalysisResults";
 import ChatInterface from "./ChatInterface";
 
-const API_BASE = "http://127.0.0.1:8000/api/v1";
+const API_BASE =
+  "https://opinionflow-backend-dd9f15bcfb74.herokuapp.com/api/v1";
 
 const OpinionFlow = () => {
   const [sessionId] = useState(() => uuidv4());
