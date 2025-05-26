@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from backend.models.product import Product
+from models.product import Product
 import httpx
-from backend.utils.retry import with_retry
+from utils.retry import with_retry
 from typing import Optional
 
 

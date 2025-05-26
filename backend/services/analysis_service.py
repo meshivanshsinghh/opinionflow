@@ -3,9 +3,9 @@ from typing import Dict, List, Optional, Any
 from collections import Counter
 import json
 from datetime import datetime
-from backend.services.pinecone_service import PineconeService
-from backend.services.gemini import GeminiModel
-from backend.core.config import get_settings
+from services.pinecone_service import PineconeService
+from services.gemini import GeminiModel
+from core.config import get_settings
 
 class AnalysisService:
     def __init__(self):

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.services.analysis_service import AnalysisService
-from backend.dependencies import get_analysis_service
+from services.analysis_service import AnalysisService
+from dependencies import get_analysis_service
 from pydantic import BaseModel
 from typing import Dict, Any
 

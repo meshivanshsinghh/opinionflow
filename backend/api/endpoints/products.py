@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
-from backend.core.exceptions import OpinionFlowException
-from backend.services.product_service import ProductService
-from backend.core.config import Settings, get_settings
-from backend.models.product import Product
-from backend.dependencies import get_product_service
-from backend.api.schemas import DiscoverResponse, DiscoverUrlResponse, ProductQuery, Product, SelectedResponse
+from core.exceptions import OpinionFlowException
+from services.product_service import ProductService
+from core.config import Settings, get_settings
+from models.product import Product
+from dependencies import get_product_service
+from api.schemas import DiscoverResponse, DiscoverUrlResponse, ProductQuery, Product, SelectedResponse
 
 router = APIRouter(tags=["products"])
 

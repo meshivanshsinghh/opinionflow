@@ -1,4 +1,4 @@
-from backend.extractors.base import BaseProductExtractor
+from extractors.base import BaseProductExtractor
 from datetime import datetime
 from bs4 import BeautifulSoup
 import re

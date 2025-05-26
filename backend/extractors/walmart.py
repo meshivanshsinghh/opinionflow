@@ -1,6 +1,6 @@
 
-from backend.extractors.base import BaseProductExtractor
-from backend.models.product import Product
+from extractors.base import BaseProductExtractor
+from models.product import Product
 import re
 from datetime import datetime
 from bs4 import BeautifulSoup

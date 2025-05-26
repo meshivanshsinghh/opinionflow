@@ -1,6 +1,6 @@
 import google.generativeai as genai
 import json 
-from backend.core.config import get_settings
+from core.config import get_settings
 
 class GeminiModel: 
     

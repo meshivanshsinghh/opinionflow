@@ -5,8 +5,8 @@ import json
 import uuid
 from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone, ServerlessSpec
-from backend.core.config import get_settings
-from backend.utils.retry import with_retry
+from core.config import get_settings
+from utils.retry import with_retry
 
 class PineconeService: 
     def __init__(self):

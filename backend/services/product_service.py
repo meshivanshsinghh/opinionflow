@@ -1,12 +1,12 @@
 import asyncio
 from typing import Dict, List, Optional
-from backend.services.brightdata import BrightDataClient
-from backend.extractors import WalmartExtractor, AmazonExtractor
-from backend.models.product import Product
+from services.brightdata import BrightDataClient
+from extractors import WalmartExtractor, AmazonExtractor
+from models.product import Product
 from datetime import datetime
-from backend.services.gemini import GeminiModel
+from services.gemini import GeminiModel
 from uuid import uuid4
-from backend.services.pinecone_service import PineconeService
+from services.pinecone_service import PineconeService
 
 class ProductService:
     def __init__(

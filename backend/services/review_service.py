@@ -2,12 +2,12 @@ import asyncio
 import re 
 from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
-from backend.services.brightdata import BrightDataClient
-from backend.services.pinecone_service import PineconeService
-from backend.core.config import get_settings
+from services.brightdata import BrightDataClient
+from services.pinecone_service import PineconeService
+from core.config import get_settings
 import httpx
 import json
-from backend.services.gemini import GeminiModel
+from services.gemini import GeminiModel
 
 class ReviewExtractionService: 
     def __init__(self):

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.services.review_service import ReviewExtractionService
-from backend.dependencies import get_review_service
+from services.review_service import ReviewExtractionService
+from dependencies import get_review_service
 from pydantic import BaseModel
 from typing import Dict, List
 

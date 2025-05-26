@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.core.config import get_settings
-from backend.api.endpoints import products
-from backend.api.endpoints import reviews
-from backend.api.endpoints import analysis
+from core.config import get_settings
+from api.endpoints import products
+from api.endpoints import reviews
+from api.endpoints import analysis
 
 
 def create_application() -> FastAPI:

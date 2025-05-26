@@ -1,6 +1,6 @@
-from backend.core.config import get_settings
-from backend.core.exceptions import ExtractionError
-from backend.utils.retry import with_retry
+from core.config import get_settings
+from core.exceptions import ExtractionError
+from utils.retry import with_retry
 import httpx
 from bs4 import BeautifulSoup
 import re
