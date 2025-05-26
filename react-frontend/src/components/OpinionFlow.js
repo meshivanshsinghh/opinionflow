@@ -14,9 +14,7 @@ import ProductSearch from "./ProductSearch";
 import ProductSelection from "./ProductSelection";
 import AnalysisResults from "./AnalysisResults";
 import ChatInterface from "./ChatInterface";
-
-const API_BASE =
-  "https://opinionflow-backend-dd9f15bcfb74.herokuapp.com/api/v1";
+import { apiClient, endpoints, handleApiError } from "../utils/api";
 
 const OpinionFlow = () => {
   const [sessionId] = useState(() => uuidv4());
@@ -38,8 +36,8 @@ const OpinionFlow = () => {
     setSearchStatus("🔍 Searching for products across stores...");
 
     try {
-      const response = await axios.post(
-        `${API_BASE}/products/discover`,
+      const response = await apiClient.post(
+        `${endpoints.discover}`,
         { query, max_per_store: maxPerStore },
         { timeout: 60000 }
       );
@@ -63,7 +61,8 @@ const OpinionFlow = () => {
       setSearchStatus(`✅ Found ${totalProducts} products for: **${query}**`);
       setCurrentStep(2);
     } catch (error) {
-      setSearchStatus(`❌ Error searching products: ${error.message}`);
+      const errorMessage = handleApiError(error);
+      setSearchStatus(`❌ Error searching products: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -89,8 +88,8 @@ const OpinionFlow = () => {
 
     try {
       // Step 1: Extract reviews
-      const extractResponse = await axios.post(
-        `${API_BASE}/reviews/extract`,
+      const extractResponse = await apiClient.post(
+        endpoints.extractReviews,
         {
           session_id: sessionId,
           selected_products: selectedProducts,
@@ -101,8 +100,8 @@ const OpinionFlow = () => {
       const extractData = extractResponse.data;
 
       // Step 2: Analyze reviews
-      const analysisResponse = await axios.post(
-        `${API_BASE}/analysis/analyze`,
+      const analysisResponse = await apiClient.post(
+        endpoints.analyzeReviews,
         {
           session_id: sessionId,
           selected_products: selectedProducts,
@@ -171,8 +170,8 @@ What would you like to know about these products?
     }
 
     try {
-      const response = await axios.post(
-        `${API_BASE}/analysis/question`,
+      const response = await apiClient.post(
+        endpoints.askQuestion,
         {
           session_id: sessionId,
           question: message,

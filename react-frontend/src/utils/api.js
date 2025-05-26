@@ -1,8 +1,7 @@
 import axios from "axios";
 
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  "https://opinionflow-backend-dd9f15bcfb74.herokuapp.com/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api/v1";
 
 // Create axios instance with default config
 export const apiClient = axios.create({
@@ -15,10 +14,10 @@ export const apiClient = axios.create({
 
 // API endpoints
 export const endpoints = {
-  discover: "/products/discover",
-  extractReviews: "/reviews/extract",
-  analyzeReviews: "/analysis/analyze",
-  askQuestion: "/analysis/question",
+  discover: "/products/discover/",
+  extractReviews: "/reviews/extract/",
+  analyzeReviews: "/analysis/analyze/",
+  askQuestion: "/analysis/question/",
 };
 
 // Helper function to handle API errors

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import json
 import uuid
-from sentence_transformers import SentenceTransformer
+import httpx
 from pinecone import Pinecone, ServerlessSpec
 from core.config import get_settings
 from utils.retry import with_retry
@@ -12,20 +12,14 @@ class PineconeService:
     def __init__(self):
         self.settings = get_settings()
         self.pc = Pinecone(api_key=self.settings.PINECONE_API_KEY)
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         self.embedding_dimension = 384
         self._indexes_initialized = False
         
-        # initializing indexes
-        # asyncio.create_task(self._ensure_indexes_exist())
-        
     async def _ensure_indexes_exist(self):
-        
         if self._indexes_initialized:
             return
         
         existing_indexes = self.pc.list_indexes().names()
-        
         
         # discovery cache index
         if self.settings.PINECONE_DISCOVERY_INDEX not in existing_indexes:
@@ -52,10 +46,56 @@ class PineconeService:
             )
         
         self._indexes_initialized = True
-            
-    # generating embedding
-    def _generate_embedding(self, text:str) -> List[float]:
-        return self.embedding_model.encode(text).tolist()
+     
+    async def _generate_embedding(self, text: str) -> List[float]:
+        """Generate embeddings using Hugging Face Inference API"""
+        try:
+            # Use HF Inference API - no local model needed
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2",
+                    headers={"Authorization": f"Bearer {self.settings.HUGGINGFACE_API_KEY}"},
+                    json={"inputs": text}
+                )
+                
+                if response.status_code == 200:
+                    embedding = response.json()
+                    # Handle different response formats
+                    if isinstance(embedding, list) and len(embedding) > 0:
+                        if isinstance(embedding[0], list):
+                            return embedding[0]  # First sentence embedding
+                        return embedding
+                    return [0.0] * self.embedding_dimension
+                else:
+                    # Fallback to simple hash-based embedding
+                    return self._simple_hash_embedding(text)
+                    
+        except Exception as e:
+            print(f"Error generating embedding: {e}")
+            # Fallback to simple hash-based embedding
+            return self._simple_hash_embedding(text)
+           
+    def _simple_hash_embedding(self, text: str) -> List[float]:
+        """Simple fallback embedding using text hashing"""
+        import hashlib
+        
+        # Create a simple but consistent embedding
+        hash_obj = hashlib.md5(text.encode())
+        hash_bytes = hash_obj.digest()
+        
+        # Convert to float vector
+        embedding = []
+        for i in range(0, len(hash_bytes), 4):
+            chunk = hash_bytes[i:i+4]
+            if len(chunk) == 4:
+                val = int.from_bytes(chunk, 'big') / (2**32)
+                embedding.append(val)
+        
+        # Pad or truncate to desired dimension
+        while len(embedding) < self.embedding_dimension:
+            embedding.extend(embedding[:min(len(embedding), self.embedding_dimension - len(embedding))])
+        
+        return embedding[:self.embedding_dimension]
     
     def _is_expired(self, expires_at) -> bool: 
         if isinstance(expires_at, (int, float)):
@@ -70,7 +110,7 @@ class PineconeService:
     async def search_discovery_cache(self, query: str) -> Optional[Dict[str, Any]]:
         await self._ensure_indexes_exist()
         try:
-            query_embedding = self._generate_embedding(query)
+            query_embedding = await self._generate_embedding(query)  # Add await
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
             current_timestamp = datetime.now().timestamp()
@@ -101,13 +141,12 @@ class PineconeService:
     async def cache_discovery_results(self, query: str, products: Dict[str, List[Dict]]) -> str:
         await self._ensure_indexes_exist()
         try:
-            query_embedding = self._generate_embedding(query)
+            query_embedding = await self._generate_embedding(query)  # Add await
             cache_id = str(uuid.uuid4())
             
             current_time = datetime.now()
             expires_at_timestamp = (current_time + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp()
         
-            
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
             index.upsert(vectors=[{
@@ -115,8 +154,8 @@ class PineconeService:
                 "values": query_embedding,
                 "metadata": {
                     "search_query": query,
-                    "timestamp": current_time.isoformat(),  # Keep as string for display
-                    "expires_at": expires_at_timestamp,     # Store as number for filtering
+                    "timestamp": current_time.isoformat(),
+                    "expires_at": expires_at_timestamp,
                     "discovered_products": json.dumps(products),
                     "product_count": sum(len(prods) for prods in products.values())
                 }
@@ -128,7 +167,6 @@ class PineconeService:
             print(f"Error caching discovery results: {e}")
             raise
         
-     
     @with_retry(max_retries=3)
     async def store_reviews(self, reviews: List[Dict], session_id: str, product_id: str, store: str) -> List[str]:
         await self._ensure_indexes_exist()
@@ -146,16 +184,16 @@ class PineconeService:
                 
                 # Create review text for embedding
                 review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
-                embedding = self._generate_embedding(review_content)
+                embedding = await self._generate_embedding(review_content)  # Add await
                 
                 # Clean metadata - ensure no null values
                 metadata = {
                     "session_id": session_id,
                     "product_id": product_id,
-                    "product_name": review.get("product_name") or "",  # Convert None to empty string
+                    "product_name": review.get("product_name") or "",
                     "store": store,
                     "review_text": review.get("review_text") or "",
-                    "title": review.get("title") or "",  # Convert None to empty string
+                    "title": review.get("title") or "",
                     "rating": review.get("rating") or 0,
                     "review_date": review.get("review_date") or "",
                     "helpful_votes": review.get("helpful_votes") or 0,
@@ -183,7 +221,7 @@ class PineconeService:
     async def search_reviews_by_session(self, session_id: str, question: str, top_k: int = 20) -> List[Dict]:
         await self._ensure_indexes_exist()
         try:
-            question_embedding = self._generate_embedding(question)
+            question_embedding = await self._generate_embedding(question)  # Add await
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
             
             results = index.query(
@@ -223,7 +261,6 @@ class PineconeService:
                 filter={"expires_at": {"$lt": current_time}}
             )
             
-             
             if results.matches:
                 expired_ids = [match.id for match in results.matches]
                 index.delete(ids=expired_ids)
@@ -236,7 +273,7 @@ class PineconeService:
     async def search_review_cache(self, cache_key: str) -> Optional[Dict[str, List[Dict]]]:
         await self._ensure_indexes_exist()
         try:
-            cache_embedding = self._generate_embedding(cache_key)
+            cache_embedding = await self._generate_embedding(cache_key)  # Add await
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
             
             results = index.query(
@@ -262,7 +299,7 @@ class PineconeService:
         await self._ensure_indexes_exist()
         try:
             cache_id = str(uuid.uuid4())
-            cache_embedding = self._generate_embedding(cache_key)
+            cache_embedding = await self._generate_embedding(cache_key)  # Add await
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
             
             # Clean the reviews data before JSON serialization

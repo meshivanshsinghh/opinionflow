@@ -68,10 +68,14 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
         {/* Product Info */}
         <div className="flex-1 min-w-0">
           <h3
-            className="font-semibold text-gray-900 text-sm leading-tight mb-2"
-            title={product.name}
+            className="font-semibold text-gray-800 mb-2 leading-tight h-10 overflow-hidden"
+            style={{
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+            }}
           >
-            {displayName}
+            {product.name}
           </h3>
 
           <div className="text-lg font-bold text-red-600 mb-2">{price}</div>

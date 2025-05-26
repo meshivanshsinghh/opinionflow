@@ -8,6 +8,8 @@ from core.config import get_settings
 import httpx
 import json
 from services.gemini import GeminiModel
+from datetime import datetime, timedelta
+from uuid import uuid4
 
 class ReviewExtractionService: 
     def __init__(self):
@@ -16,6 +18,7 @@ class ReviewExtractionService:
         self.settings = get_settings()
         self.gemini = GeminiModel()
         
+    # extracting reviews for product
     async def extract_reviews_for_products(
         self, 
         session_id: str, 
@@ -26,11 +29,43 @@ class ReviewExtractionService:
         try:
             cached_reviews = await self._check_review_cache(selected_products)
             if cached_reviews: 
+                print(f"Review cache hit - storing reviews with session_id: {session_id}")
+                
+                # Store cached reviews in Pinecone with current session_id
+                try:
+                    for store, store_reviews in cached_reviews.items():
+                        if store in selected_products:
+                            product = selected_products[store]
+                            
+                            # Split reviews into smaller batches to avoid metadata size limits
+                            batch_size = 10
+                            for i in range(0, len(store_reviews), batch_size):
+                                batch_reviews = store_reviews[i:i + batch_size]
+                                
+                                try:
+                                    await self.pinecone.store_reviews(
+                                        reviews=batch_reviews,
+                                        session_id=session_id, 
+                                        product_id=product["id"],
+                                        store=store
+                                    )
+                                except Exception as e:
+                                    print(f"Error storing review batch {i//batch_size + 1} for {store}: {e}")
+                                    continue
+                            
+                    print(f"Successfully stored {sum(len(reviews) for reviews in cached_reviews.values())} cached reviews with session_id")
+                    
+                except Exception as e:
+                    print(f"Error storing cached reviews with session_id: {e}")
+                
+                # Return cached reviews - NO need to cache again
                 return cached_reviews
+                
         except Exception as e:
             print(f"Error checking review cache: {e}")
-    
-        # extracting reviews concurrently
+
+        # extracting reviews concurrently (fresh extraction)
+        print("No cache found - extracting fresh reviews")
         tasks = []
         for store, product in selected_products.items():
             if store == "amazon":
@@ -41,8 +76,7 @@ class ReviewExtractionService:
             
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        
-        # organizing reults
+        # organizing results
         all_reviews = {}
         for (store, product), reviews in zip(selected_products.items(), results):
             if isinstance(reviews, Exception):
@@ -51,13 +85,140 @@ class ReviewExtractionService:
             else:
                 all_reviews[store] = reviews[:100]
         
-        # storing in pinecone
+        # storing fresh reviews in pinecone
+        try:
+            for store, store_reviews in all_reviews.items():
+                if store in selected_products:
+                    product = selected_products[store]
+                    
+                    # Split reviews into smaller batches to avoid metadata size limits
+                    batch_size = 10  # Process 10 reviews at a time
+                    for i in range(0, len(store_reviews), batch_size):
+                        batch_reviews = store_reviews[i:i + batch_size]
+                        
+                        try:
+                            await self.pinecone.store_reviews(
+                                reviews=batch_reviews,
+                                session_id=session_id, 
+                                product_id=product["id"],
+                                store=store
+                            )
+                        except Exception as e:
+                            print(f"Error storing review batch {i//batch_size + 1} for {store}: {e}")
+                            continue
+            
+            print(f"Successfully stored {sum(len(reviews) for reviews in all_reviews.values())} fresh reviews with session_id")
+            
+        except Exception as e:
+            print(f"Error storing fresh reviews: {e}")
+        
+        # Cache fresh reviews for future use (ONLY for fresh extractions)
         try:
             await self._cache_reviews(session_id, selected_products, all_reviews)
+            print("Successfully cached fresh reviews for future use")
         except Exception as e:
-            print(f"Error caching reviews: {e}")
+            print(f"Error caching fresh review results: {e}")
         
         return all_reviews
+    # async def extract_reviews_for_products(
+    #     self, 
+    #     session_id: str, 
+    #     selected_products: Dict[str, Dict],
+    # ) -> Dict[str, List[Dict]]:
+        
+    #     # checking the cache first
+    #     try:
+    #         cached_reviews = await self._check_review_cache(selected_products)
+    #         if cached_reviews: 
+    #             print(f"Review cache hit - storing reviews with session_id: {session_id}")
+                
+    #             # Store cached reviews in Pinecone with current session_id
+    #             try:
+    #                 for store, store_reviews in cached_reviews.items():
+    #                     if store in selected_products:
+    #                         product = selected_products[store]
+                            
+    #                         # Split reviews into smaller batches to avoid metadata size limits
+    #                         batch_size = 10
+    #                         for i in range(0, len(store_reviews), batch_size):
+    #                             batch_reviews = store_reviews[i:i + batch_size]
+                                
+    #                             try:
+    #                                 await self.pinecone.store_reviews(
+    #                                     reviews=batch_reviews,
+    #                                     session_id=session_id, 
+    #                                     product_id=product["id"],
+    #                                     store=store
+    #                                 )
+    #                             except Exception as e:
+    #                                 print(f"Error storing review batch {i//batch_size + 1} for {store}: {e}")
+    #                                 continue
+                                
+    #                 print(f"Successfully stored {sum(len(reviews) for reviews in cached_reviews.values())} cached reviews with session_id")
+                    
+    #             except Exception as e:
+    #                 print(f"Error storing cached reviews with session_id: {e}")
+                
+    #             return cached_reviews
+                
+    #     except Exception as e:
+    #         print(f"Error checking review cache: {e}")
+
+    #     # extracting reviews concurrently (fresh extraction)
+    #     tasks = []
+    #     for store, product in selected_products.items():
+    #         if store == "amazon":
+    #             tasks.append(self._extract_amazon_reviews(product))
+                
+    #         elif store == "walmart":
+    #             tasks.append(self._extract_walmart_reviews(product))
+            
+    #     results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+    #     # organizing results
+    #     all_reviews = {}
+    #     for (store, product), reviews in zip(selected_products.items(), results):
+    #         if isinstance(reviews, Exception):
+    #             print(f"Error extracting {store} reviews: {reviews}")
+    #             all_reviews[store] = []
+    #         else:
+    #             all_reviews[store] = reviews[:100]
+        
+    #     # storing in pinecone
+    #     try:
+    #         for store, store_reviews in all_reviews.items():
+    #             if store in selected_products:
+    #                 product = selected_products[store]
+                    
+    #                 # Split reviews into smaller batches to avoid metadata size limits
+    #                 batch_size = 10  # Process 10 reviews at a time
+    #                 for i in range(0, len(store_reviews), batch_size):
+    #                     batch_reviews = store_reviews[i:i + batch_size]
+                        
+    #                     try:
+    #                         await self.pinecone.store_reviews(
+    #                             reviews=batch_reviews,
+    #                             session_id=session_id, 
+    #                             product_id=product["id"],
+    #                             store=store
+    #                         )
+    #                     except Exception as e:
+    #                         print(f"Error storing review batch {i//batch_size + 1} for {store}: {e}")
+    #                         continue
+            
+    #         print(f"Successfully stored {sum(len(reviews) for reviews in all_reviews.values())} fresh reviews with session_id")
+            
+    #     except Exception as e:
+    #         print(f"Error storing fresh reviews: {e}")
+        
+    #     # Cache aggregated results with reduced metadata
+    #     try:
+    #         await self._cache_reviews(session_id, selected_products, all_reviews)
+    #     except Exception as e:
+    #         print(f"Error caching aggregated review results: {e}")
+        
+    #     return all_reviews
+    
     
     # extracting amazon reviews
     async def _extract_amazon_reviews(self, product: Dict) -> List[Dict]:
@@ -292,71 +453,136 @@ class ReviewExtractionService:
         return None
     
     # checking reviews cache
-    async def _check_review_cache(self, selected_products:Dict[str, Dict]) -> Optional[Dict[str, List[Dict]]]:
-        cache_key = self._generate_cache_key(selected_products)
-        
-        # searching for cached reviews
-        cached = await self.pinecone.search_review_cache(cache_key)
-        
-        if cached:
-            print(f"Review cache hit for products: {cache_key}")
-            return cached
-        
-        return None
+    async def _check_review_cache(self, selected_products: Dict[str, Dict]) -> Optional[Dict[str, List[Dict]]]:
+        """Check if reviews are cached for the exact product combination"""
+        try:
+            # Generate a more specific cache key
+            cache_key = self._generate_cache_key(selected_products)
+            print(f"🔍 Checking cache for key: {cache_key}")
+            
+            # Search for exact cache match in Pinecone
+            cache_embedding = await self.pinecone._generate_embedding(cache_key)
+            index = self.pinecone.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
+            
+            # Remove session_id dependency - search only by cache properties
+            results = index.query(
+                vector=cache_embedding,
+                top_k=5,  # Get more results to check
+                include_metadata=True,
+                filter={
+                    "is_cache": True,
+                    "expires_at": {"$gt": datetime.now().timestamp()}
+                }
+            )
+            
+            print(f"🔍 Found {len(results.matches)} potential cache entries")
+            
+            # Check each result for exact cache key match
+            for match in results.matches:
+                stored_cache_key = match.metadata.get("cache_key", "")
+                similarity_score = match.score
+                
+                print(f"🔍 Comparing cache keys:")
+                print(f"   Stored: {stored_cache_key[:100]}...")
+                print(f"   Looking for: {cache_key[:100]}...")
+                print(f"   Similarity: {similarity_score}")
+                
+                # Check for exact match
+                if stored_cache_key == cache_key:
+                    cached_data = match.metadata.get("cached_reviews")
+                    if cached_data:
+                        print(f"✅ Exact cache key match! Score: {similarity_score}")
+                        return json.loads(cached_data)
+                elif similarity_score > 0.98:  # Very high similarity as fallback
+                    cached_data = match.metadata.get("cached_reviews")
+                    if cached_data:
+                        print(f"✅ High similarity cache match! Score: {similarity_score}")
+                        return json.loads(cached_data)
+            
+            print("❌ No matching cache found")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error checking review cache: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     # generating cache key
     def _generate_cache_key(self, selected_products: Dict[str, Dict]) -> str:
-        urls = sorted([product["url"] for product in selected_products.values()])
-        return "|".join(urls)
+        """Generate a unique cache key for the product combination"""
+        # Create a more detailed cache key
+        key_parts = []
+        for store in sorted(selected_products.keys()):
+            product = selected_products[store]
+            # Include both URL and product name for uniqueness
+            key_parts.append(f"{store}:{product['url']}:{product['name']}")
+        
+        cache_key = "|".join(key_parts)
+        print(f"🔑 Generated cache key: {cache_key}")
+        return cache_key
 
     # caching review
     async def _cache_reviews(self, session_id: str, selected_products: Dict[str, Dict], reviews: Dict[str, List[Dict]]):
-        cache_key = self._generate_cache_key(selected_products)
-        
-        # storing reviews in pinecone with cache metadata
-        for store, store_reviews in reviews.items():
-            product = selected_products[store]
-            
-            # Split reviews into smaller batches to avoid metadata size limits
-            batch_size = 10  # Process 10 reviews at a time
-            for i in range(0, len(store_reviews), batch_size):
-                batch_reviews = store_reviews[i:i + batch_size]
-                
-                try:
-                    await self.pinecone.store_reviews(
-                        reviews=batch_reviews,
-                        session_id=session_id, 
-                        product_id=product["id"],
-                        store=store
-                    )
-                except Exception as e:
-                    print(f"Error storing review batch {i//batch_size + 1} for {store}: {e}")
-                    continue
-            
-        # Cache aggregated results with reduced metadata
+        """Cache reviews with detailed metadata"""
         try:
-            # Reduce the size of cached data by keeping only essential fields
-            reduced_reviews = {}
+            cache_key = self._generate_cache_key(selected_products)
+            cache_id = str(uuid4())
+            
+            print(f"💾 Caching reviews with key: {cache_key}")
+            
+            # Clean the reviews data before JSON serialization
+            cleaned_reviews = {}
             for store, store_reviews in reviews.items():
-                reduced_reviews[store] = []
+                cleaned_reviews[store] = []
                 for review in store_reviews[:50]:  # Limit to 50 reviews per store for caching
-                    reduced_review = {
-                        "review_text": review["review_text"][:500],  # Truncate long reviews
-                        "title": review["title"][:100],  # Truncate long titles
-                        "rating": review["rating"],
-                        "review_date": review["review_date"],
-                        "helpful_votes": review["helpful_votes"],
-                        "product_name": review["product_name"][:100],  # Truncate product name
+                    cleaned_review = {
+                        "review_text": review.get("review_text", "")[:500],  # Truncate long reviews
+                        "title": review.get("title", "")[:100],  # Truncate long titles
+                        "rating": review.get("rating", 0),
+                        "review_date": review.get("review_date", ""),
+                        "helpful_votes": review.get("helpful_votes", 0),
+                        "product_name": review.get("product_name", "")[:100],  # Truncate product name
                         "reviewer_name": review.get("reviewer_name", "")[:50],  # Truncate reviewer name
                         "verified_purchase": review.get("verified_purchase", False)
                     }
-                    reduced_reviews[store].append(reduced_review)
+                    cleaned_reviews[store].append(cleaned_review)
             
-            await self.pinecone.cache_review_results(cache_key, reduced_reviews)
+            # Generate embedding for the cache key
+            cache_embedding = await self.pinecone._generate_embedding(cache_key)
+            index = self.pinecone.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
+            
+            # Store with detailed metadata
+            metadata = {
+                "cache_key": cache_key,
+                "is_cache": True,
+                "cached_reviews": json.dumps(cleaned_reviews),
+                "timestamp": datetime.now().isoformat(),
+                "expires_at": (datetime.now() + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp(),
+                "product_count": len(selected_products),
+                "review_count": sum(len(store_reviews) for store_reviews in cleaned_reviews.values()),
+                # Add product details for debugging
+                "products_info": json.dumps({
+                    store: {
+                        "name": product["name"][:100],
+                        "url": product["url"][:200]
+                    }
+                    for store, product in selected_products.items()
+                })
+            }
+            
+            index.upsert(vectors=[{
+                "id": cache_id,
+                "values": cache_embedding,
+                "metadata": metadata
+            }])
+            
+            print(f"✅ Successfully cached {sum(len(r) for r in cleaned_reviews.values())} reviews")
             
         except Exception as e:
-            print(f"Error caching aggregated review results: {e}")
-        
+            print(f"❌ Error caching review results: {e}")
+            import traceback
+            traceback.print_exc()   
 
     def _get_walmart_total_pages(self, html: str) -> int:
         """Parse pagination to get total pages"""
