@@ -1,7 +1,7 @@
 from backend.services.brightdata import BrightDataClient
 from functools import lru_cache
 from backend.services.review_service import ReviewExtractionService
-
+from backend.services.analysis_service import AnalysisService
 
 @lru_cache
 def get_bd_client() -> BrightDataClient:
@@ -19,3 +19,6 @@ def get_product_service():
 
 def get_review_service() -> ReviewExtractionService:
     return ReviewExtractionService()
+
+def get_analysis_service():
+    return AnalysisService()
