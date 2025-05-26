@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import get_settings
 from backend.api.endpoints import products
 from backend.api.endpoints import reviews
+from backend.api.endpoints import analysis
+
 
 def create_application() -> FastAPI:
     settings = get_settings()
@@ -16,7 +18,11 @@ def create_application() -> FastAPI:
     # Set up CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[
+            "http://localhost:3000",
+            "https://your-nextjs-app.vercel.app",
+            "https://*.vercel.app"
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -35,12 +41,12 @@ def create_application() -> FastAPI:
         tags=["reviews"]
     )
     
-    # TODO: include history mechanism
-    # app.include_router(
-    #     history.router,
-    #     prefix=f"{settings.API_V1_STR}/history",
-    #     tags=["history"]
-    # )
+    app.include_router(
+        analysis.router,
+        prefix=f"{settings.API_V1_STR}/analysis",
+        tags=["analysis"]
+    )
+    
 
     return app
 
