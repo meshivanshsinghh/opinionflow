@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, List, Optional, Any
-from collections import Counter
 import json
+import hashlib
 from datetime import datetime
 from services.pinecone_service import PineconeService
 from services.gemini import GeminiModel
@@ -13,11 +13,10 @@ class AnalysisService:
         self.gemini = GeminiModel()
         self.settings = get_settings()
     
-    async def analyze_reviews(self, session_id: str, selected_products: Dict[str, Dict]) -> Dict[str, Any]:
-        """Complete analysis of reviews for selected products"""
+    async def analyze_reviews(self, selected_products: Dict[str, Dict]) -> Dict[str, Any]:
         try:
-            # Get all reviews for the session
-            all_reviews = await self._get_session_reviews(session_id)
+            comparison_id = self._generate_comparison_id(selected_products)
+            all_reviews = await self._get_comparison_reviews(comparison_id)
             
             if not all_reviews:
                 return {"error": "No reviews found for analysis"}
@@ -34,7 +33,7 @@ class AnalysisService:
             sentiment, pros_cons, rating_dist, themes, summary = await asyncio.gather(*tasks)
             
             return {
-                "session_id": session_id,
+                "comparison_id": comparison_id,
                 "products": selected_products,
                 "total_reviews": len(all_reviews),
                 "sentiment_analysis": sentiment,
@@ -49,12 +48,13 @@ class AnalysisService:
             print(f"Error in analysis: {e}")
             return {"error": str(e)}
     
-    async def answer_question(self, session_id: str, question: str) -> Dict[str, Any]:
-        """Answer user questions using RAG with review context"""
+    async def answer_question(self, question: str, selected_products: Dict[str, Dict]) -> Dict[str, Any]:
         try:
-            # Get relevant reviews using similarity search
-            relevant_reviews = await self.pinecone.search_reviews_by_session(
-                session_id=session_id,
+            comparison_id = self._generate_comparison_id(selected_products)
+            # TODO: get this method and understand what this is
+            # add this method in pinecone db search_reviews_by_comparison
+            relevant_reviews = await self.pinecone.search_reviews_by_comparison(
+                comparison_id=comparison_id,
                 question=question,
                 top_k=15
             )
@@ -66,10 +66,11 @@ class AnalysisService:
                     "confidence": 0.0
                 }
             
-            # Generate answer using Gemini with context
+            # generating answer using gemini
             answer_data = await self._generate_rag_answer(question, relevant_reviews)
             
             return {
+                "comparison_id": comparison_id,
                 "question": question,
                 "answer": answer_data["answer"],
                 "sources": answer_data["sources"],
@@ -81,21 +82,35 @@ class AnalysisService:
             print(f"Error answering question: {e}")
             return {"error": str(e)}
     
-    async def _get_session_reviews(self, session_id: str) -> List[Dict]:
-        """Get all reviews for a session"""
-        # Use a broad search to get all reviews for the session
-        dummy_query = "product review"
-        reviews = await self.pinecone.search_reviews_by_session(
-            session_id=session_id,
-            question=dummy_query,
-            top_k=1000  # Get all reviews
-        )
-        return reviews
+    def _generate_comparison_id(self, selected_products: Dict[str, Dict]) -> str:
+        product_keys = []
+        
+        for store in sorted(selected_products.keys()):
+            product = selected_products[store]
+            product_id = product.get("id", "")
+            product_keys.append(f"{store}_{product_id}")
+        
+        comparison_key = "|".join(product_keys)
+        comparison_hash = hashlib.md5(comparison_key.encode()).hexdigest()[:16]
+        
+        return f"COMP_{comparison_hash}"
+    
+    async def _get_comparison_reviews(self, comparison_id: str) -> List[Dict]:
+        try:
+            # TODO: understand this mechanism and add this method
+            # to pinecone search_reviews_by_comparison
+            reviews = await self.pinecone.search_reviews_by_comparison(
+                comparison_id=comparison_id,
+                question="product review analysis",
+                top_k=1000
+            )
+            return reviews
+        except Exception as e:
+            print(f"Error getting comparison reviews: {e}")
+            return []
     
     async def _analyze_sentiment(self, reviews: List[Dict]) -> Dict[str, Any]:
-        """Analyze overall sentiment across stores"""
         try:
-            # Group by store
             store_reviews = {}
             for review in reviews:
                 store = review.get("store", "unknown")
@@ -103,13 +118,11 @@ class AnalysisService:
                     store_reviews[store] = []
                 store_reviews[store].append(review)
             
-            # Analyze sentiment for each store
             store_sentiment = {}
             for store, store_revs in store_reviews.items():
                 ratings = [r.get("rating", 0) for r in store_revs]
                 avg_rating = sum(ratings) / len(ratings) if ratings else 0
                 
-                # Categorize sentiment based on ratings
                 positive = len([r for r in ratings if r >= 4])
                 neutral = len([r for r in ratings if r == 3])
                 negative = len([r for r in ratings if r <= 2])
@@ -131,9 +144,7 @@ class AnalysisService:
             return {}
     
     async def _extract_pros_cons(self, reviews: List[Dict]) -> Dict[str, List[str]]:
-        """Extract pros and cons using Gemini"""
         try:
-            # Sample reviews for analysis (to avoid token limits)
             sample_reviews = reviews[:50] if len(reviews) > 50 else reviews
             
             review_texts = []
@@ -142,18 +153,19 @@ class AnalysisService:
                 review_texts.append(text)
             
             prompt = f"""
-            Analyze these product reviews and extract the top pros and cons mentioned by customers.
-            
-            Reviews:
-            {chr(10).join(review_texts[:30])}  # Limit to avoid token limits
-            
-            Return a JSON object with:
-            {{
-                "pros": ["list of top 5 positive aspects mentioned"],
-                "cons": ["list of top 5 negative aspects mentioned"]
-            }}
-            
-            Focus on the most frequently mentioned points across all reviews.
+                Analyze these product reviews and extract the top pros and cons mentioned by customers.
+                
+                Reviews:
+                {chr(10).join(review_texts[:30])}
+                
+                Return a JSON object with:
+                {{
+                    "pros": ["list of top 5 positive aspects mentioned"],
+                    "cons": ["list of top 5 negative aspects mentioned"]
+                }}
+                
+                Focus on the most frequently mentioned points across all reviews.
+                
             """
             
             response = await self.gemini.generate_content(prompt)
@@ -169,7 +181,6 @@ class AnalysisService:
             return {"pros": [], "cons": []}
     
     async def _analyze_rating_distribution(self, reviews: List[Dict]) -> Dict[str, Any]:
-        """Analyze rating distribution across stores"""
         try:
             store_distributions = {}
             
@@ -183,7 +194,7 @@ class AnalysisService:
                 if 1 <= rating <= 5:
                     store_distributions[store][rating] += 1
             
-            # Convert to percentages
+            # converting to percentages
             for store, dist in store_distributions.items():
                 total = sum(dist.values())
                 if total > 0:
@@ -197,26 +208,24 @@ class AnalysisService:
             return {}
     
     async def _extract_common_themes(self, reviews: List[Dict]) -> List[Dict[str, Any]]:
-        """Extract common themes using Gemini"""
         try:
-            # Sample reviews for theme analysis
-            sample_reviews = reviews[:40] if len(reviews) > 40 else reviews
+            sample_reviews = reviews[:50] if len(reviews) > 50 else reviews
             
             review_texts = [r.get("review_text", "") for r in sample_reviews]
-            combined_text = " ".join(review_texts)[:8000]  # Limit text length
+            combined_text = " ".join(review_texts)[:8000]
             
             prompt = f"""
-            Analyze these product reviews and identify the top 5 most common themes or topics discussed.
-            
-            Reviews text: {combined_text}
-            
-            Return a JSON array of objects:
-            [
-                {{"theme": "Theme name", "frequency": "High/Medium/Low", "description": "Brief description"}},
-                ...
-            ]
-            
-            Focus on aspects like: quality, price, shipping, customer service, product features, etc.
+                Analyze these product reviews and identify the top 5 most common themes or topics discussed.
+                
+                Reviews text: {combined_text}
+                
+                Return a JSON array of objects:
+                [
+                    {{"theme": "Theme name", "frequency": "High/Medium/Low", "description": "Brief description"}},
+                    ...
+                ]
+                
+                Focus on aspects like: quality, price, shipping, customer service, product features, etc.
             """
             
             response = await self.gemini.generate_content(prompt)
@@ -229,13 +238,10 @@ class AnalysisService:
             return []
     
     async def _generate_overall_summary(self, reviews: List[Dict], products: Dict[str, Dict]) -> str:
-        """Generate overall summary of the analysis"""
         try:
-            # Get basic stats
             total_reviews = len(reviews)
             avg_rating = sum(r.get("rating", 0) for r in reviews) / total_reviews if total_reviews > 0 else 0
             
-            # Group by store
             store_stats = {}
             for review in reviews:
                 store = review.get("store", "unknown")
@@ -244,22 +250,21 @@ class AnalysisService:
                 store_stats[store]["count"] += 1
                 store_stats[store]["total_rating"] += review.get("rating", 0)
             
-            # Calculate store averages
             for store, stats in store_stats.items():
                 stats["avg_rating"] = stats["total_rating"] / stats["count"] if stats["count"] > 0 else 0
             
             prompt = f"""
-            Generate a concise summary of this product review analysis:
-            
-            Products analyzed:
-            {json.dumps(products, indent=2)}
-            
-            Review statistics:
-            - Total reviews: {total_reviews}
-            - Overall average rating: {avg_rating:.2f}/5
-            - Store breakdown: {json.dumps(store_stats, indent=2)}
-            
-            Write a 2-3 sentence summary highlighting the key insights about these products across different stores.
+                Generate a concise summary of this product review analysis:
+                
+                Products analyzed:
+                {json.dumps(products, indent=2)}
+                
+                Review statistics:
+                - Total reviews: {total_reviews}
+                - Overall average rating: {avg_rating:.2f}/5
+                - Store breakdown: {json.dumps(store_stats, indent=2)}
+                
+                Write a 2-3 sentence summary highlighting the key insights about these products across different stores.
             """
             
             response = await self.gemini.generate_content(prompt)
@@ -270,47 +275,44 @@ class AnalysisService:
             return "Analysis completed successfully."
     
     async def _generate_rag_answer(self, question: str, relevant_reviews: List[Dict]) -> Dict[str, Any]:
-        """Generate answer using RAG with citations"""
         try:
-            # Prepare context from relevant reviews
             context_reviews = []
-            for i, review in enumerate(relevant_reviews[:10]):  # Top 10 most relevant
+            for i, review in enumerate(relevant_reviews[:10]):
                 context_reviews.append({
                     "id": i + 1,
                     "store": review.get("store", ""),
                     "rating": review.get("rating", 0),
-                    "text": review.get("review_text", "")[:500],  # Truncate long reviews
+                    "text": review.get("review_text", "")[:500],
                     "title": review.get("title", ""),
                     "similarity": round(review.get("similarity_score", 0), 3)
                 })
             
             prompt = f"""
-            Answer the user's question based on the provided product reviews. Use specific information from the reviews and cite your sources.
-            
-            Question: {question}
-            
-            Relevant Reviews:
-            {json.dumps(context_reviews, indent=2)}
-            
-            Instructions:
-            1. Answer the question directly and comprehensively
-            2. Use specific information from the reviews
-            3. Mention which stores/reviews support your points
-            4. If comparing stores, be objective
-            5. If you can't answer confidently, say so
-            
-            Return a JSON object:
-            {{
-                "answer": "Your detailed answer here",
-                "sources": [1, 2, 3],  // Array of review IDs that support the answer
-                "confidence": 0.85  // Confidence score 0-1
-            }}
+                Answer the user's question based on the provided product reviews. Use specific information from the reviews and cite your sources.
+                
+                Question: {question}
+                
+                Relevant Reviews:
+                {json.dumps(context_reviews, indent=2)}
+                
+                Instructions:
+                1. Answer the question directly and comprehensively
+                2. Use specific information from the reviews
+                3. Mention which stores/reviews support your points
+                4. If comparing stores, be objective
+                5. If you can't answer confidently, say so
+                
+                Return a JSON object:
+                {{
+                    "answer": "Your detailed answer here",
+                    "sources": [1, 2, 3],
+                    "confidence": 0.85
+                }}
             """
             
             response = await self.gemini.generate_content(prompt)
             result = json.loads(response.text)
             
-            # Map source IDs back to review details
             cited_sources = []
             for source_id in result.get("sources", []):
                 if 1 <= source_id <= len(context_reviews):

@@ -38,9 +38,9 @@ class ProductService:
 
     async def discover_products(self, query: str, max_per_store: int = 5) -> Dict[str, List[Product]]:
         # checking cache first
-        cached_results = await self.pinecone.search_discovery_cache(query)
+        cached_results = await self.pinecone.search_discovery_cache_exact(query)
         if cached_results:
-            print(f"Cache hit for query: {query} (similarity: {cached_results['similarity_score']:.3f})")
+            print(f"Exact cache hit for query: {query} (similarity: {cached_results['similarity_score']:.3f})")
             return self._convert_cached_to_products(cached_results["discovered_products"])
 
         # doing a fresh discovery
@@ -120,7 +120,7 @@ class ProductService:
                 for prod in product_dicts
             ]
         
-        await self.pinecone.cache_discovery_results(query, products_for_cache)
+        await self.pinecone.cache_discovery_results_exact(query, products_for_cache)
         return results
 
 
