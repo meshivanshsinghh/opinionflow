@@ -28,16 +28,14 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
   ));
 
   // Create spec tags (limit to 2 for compact layout)
-  const specTags = Object.entries(specs)
-    .slice(0, 2)
-    .map(([key, value]) => (
-      <span
-        key={key}
-        className="inline-block bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs mr-1 mb-1"
-      >
-        {key}: {value}
-      </span>
-    ));
+  const specTags = Object.entries(specs).map(([key, value]) => (
+    <span
+      key={key}
+      className="inline-block bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs mr-1 mb-1"
+    >
+      {key}: {value}
+    </span>
+  ));
 
   return (
     <div
@@ -73,6 +71,7 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
               display: "-webkit-box",
               WebkitLineClamp: 2,
               WebkitBoxOrient: "vertical",
+              wordBreak: "break-word",
             }}
           >
             {product.name}
@@ -87,7 +86,9 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
             </span>
           </div>
 
-          {specTags.length > 0 && <div className="mb-2">{specTags}</div>}
+          {specTags.length > 0 && (
+            <div className="mb-2 max-h-16 overflow-hidden">{specTags}</div>
+          )}
         </div>
 
         {/* Selection Indicator */}

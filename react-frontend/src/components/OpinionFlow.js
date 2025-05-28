@@ -220,41 +220,84 @@ What would you like to know about these products?
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-8 px-6 text-center shadow-lg">
-        <h1 className="text-4xl font-bold mb-2">🗣️ OpinionFlow</h1>
-        <p className="text-xl opacity-95">
-          AI-Powered Cross-Store Product Review Intelligence
-        </p>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* Step 1: Product Discovery */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-gray-100">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold">
-              1
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <Search className="w-6 h-6" />
-              Discover Products
-            </h2>
-          </div>
-
-          <ProductSearch
-            onSearch={searchProducts}
-            loading={loading}
-            status={searchStatus}
-          />
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-700">
+      {/* Enhanced Header with Search */}
+      <div className="relative text-white overflow-hidden">
+        {/* Background Pattern */}
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
         </div>
 
-        {/* Step 2: Product Selection */}
+        <div className="relative z-10 py-16 px-6 text-center max-w-6xl mx-auto">
+          {/* Logo and Title Section */}
+          <div className="mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl mb-6 shadow-xl">
+              <span className="text-4xl">🗣️</span>
+            </div>
+            <h1 className="text-5xl md:text-6xl font-bold mb-4 bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent">
+              OpinionFlow
+            </h1>
+            <div className="w-24 h-1 bg-gradient-to-r from-yellow-400 to-orange-500 mx-auto rounded-full mb-6"></div>
+          </div>
+
+          {/* Tagline */}
+          <div className="max-w-4xl mx-auto">
+            <p className="text-xl md:text-2xl font-medium mb-4 leading-relaxed">
+              AI-Powered Cross-Store Product Review Intelligence
+            </p>
+            <p className="text-lg opacity-90 mb-8 max-w-2xl mx-auto leading-relaxed">
+              Discover, compare, and analyze products across multiple stores
+              with intelligent review insights
+            </p>
+          </div>
+
+          {/* Search Section - Now in Header */}
+          <div className="max-w-2xl mx-auto mb-8">
+            <ProductSearch
+              onSearch={searchProducts}
+              loading={loading}
+              status={searchStatus}
+            />
+          </div>
+
+          {/* Feature Pills */}
+          <div className="flex flex-wrap justify-center gap-3">
+            <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-medium">
+              <Search className="w-4 h-4" />
+              Smart Discovery
+            </div>
+            <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-medium">
+              <BarChart3 className="w-4 h-4" />
+              Deep Analysis
+            </div>
+            <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-medium">
+              <MessageCircle className="w-4 h-4" />
+              AI Chat
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-0 space-y-8">
+        {/* Success Message when products are found */}
+        {currentStep >= 2 && (
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-2 bg-white/90 backdrop-blur-sm text-green-800 px-4 py-2 rounded-full">
+              {" "}
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className="font-medium">
+                Products Found! Choose items to compare below.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Step 1: Product Selection */}
         {currentStep >= 2 && (
           <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-gray-100">
             <div className="flex items-center gap-3 mb-6">
               <div className="flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold">
-                2
+                1
               </div>
               <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                 <ShoppingCart className="w-6 h-6" />
@@ -273,12 +316,12 @@ What would you like to know about these products?
           </div>
         )}
 
-        {/* Step 3: Analysis Results */}
+        {/* Step 2: Analysis Results */}
         {currentStep >= 3 && analysisResults && (
           <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-gray-100">
             <div className="flex items-center gap-3 mb-6">
               <div className="flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold">
-                3
+                2
               </div>
               <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                 <BarChart3 className="w-6 h-6" />
@@ -293,12 +336,12 @@ What would you like to know about these products?
           </div>
         )}
 
-        {/* Step 4: Chat Interface */}
+        {/* Step 3: Chat Interface */}
         {currentStep >= 3 && analysisResults && (
           <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-gray-100">
             <div className="flex items-center gap-3 mb-6">
               <div className="flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold">
-                4
+                3
               </div>
               <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                 <MessageCircle className="w-6 h-6" />

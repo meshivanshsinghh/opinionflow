@@ -19,7 +19,7 @@ const ProductSearch = ({ onSearch, loading, status }) => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g., iPhone 14 Pro, Nike Air Max, Samsung TV, MacBook Pro..."
-            className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none transition-colors text-lg"
+            className="text-black w-full px-4 py-3 border-2 border-white/30 bg-white/90 backdrop-blur-sm rounded-lg focus:border-white focus:bg-white focus:outline-none transition-colors text-lg placeholder-gray-500"
             disabled={loading}
           />
         </div>
