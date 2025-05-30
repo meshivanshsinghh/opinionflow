@@ -173,8 +173,8 @@ What would you like to know about these products?
       const response = await apiClient.post(
         endpoints.askQuestion,
         {
-          session_id: sessionId,
           question: message,
+          selected_products: selectedProducts,
         },
         { timeout: 30000 }
       );

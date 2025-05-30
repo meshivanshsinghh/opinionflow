@@ -50,9 +50,9 @@ class AnalysisService:
     
     async def answer_question(self, question: str, selected_products: Dict[str, Dict]) -> Dict[str, Any]:
         try:
+             
             comparison_id = self._generate_comparison_id(selected_products)
-            # TODO: get this method and understand what this is
-            # add this method in pinecone db search_reviews_by_comparison
+ 
             relevant_reviews = await self.pinecone.search_reviews_by_comparison(
                 comparison_id=comparison_id,
                 question=question,
@@ -97,8 +97,17 @@ class AnalysisService:
     
     async def _get_comparison_reviews(self, comparison_id: str) -> List[Dict]:
         try:
-            # TODO: understand this mechanism and add this method
-            # to pinecone search_reviews_by_comparison
+            # getting cached reviews first
+            # cached_reviews = await self.pinecone.search_comparison_cache(comparison_id)
+            # if cached_reviews: 
+            #     all_reviews = []
+            #     for store, store_reviews in cached_reviews.items():
+            #         for review in store_reviews:
+            #             review["store"] = store
+            #             all_reviews.append(review)
+            #     return all_reviews
+            
+            # Just search individual review vectors directly
             reviews = await self.pinecone.search_reviews_by_comparison(
                 comparison_id=comparison_id,
                 question="product review analysis",
@@ -276,6 +285,7 @@ class AnalysisService:
     
     async def _generate_rag_answer(self, question: str, relevant_reviews: List[Dict]) -> Dict[str, Any]:
         try:
+             
             context_reviews = []
             for i, review in enumerate(relevant_reviews[:10]):
                 context_reviews.append({
@@ -289,29 +299,39 @@ class AnalysisService:
             
             prompt = f"""
                 Answer the user's question based on the provided product reviews. Use specific information from the reviews and cite your sources.
-                
+
                 Question: {question}
-                
+
                 Relevant Reviews:
                 {json.dumps(context_reviews, indent=2)}
-                
+
                 Instructions:
                 1. Answer the question directly and comprehensively
                 2. Use specific information from the reviews
                 3. Mention which stores/reviews support your points
                 4. If comparing stores, be objective
                 5. If you can't answer confidently, say so
-                
-                Return a JSON object:
+
+                Return ONLY a valid JSON object in this exact format:
                 {{
                     "answer": "Your detailed answer here",
                     "sources": [1, 2, 3],
                     "confidence": 0.85
                 }}
             """
-            
             response = await self.gemini.generate_content(prompt)
-            result = json.loads(response.text)
+            
+            # Add proper JSON parsing with error handling
+            try:
+                result = json.loads(response.text)
+            except json.JSONDecodeError as json_error:
+                # Try to extract answer from raw text as fallback
+                return {
+                    "answer": response.text if response.text else "I couldn't generate a proper answer.",
+                    "sources": [],
+                    "confidence": 0.3
+                }
+                        
             
             cited_sources = []
             for source_id in result.get("sources", []):
@@ -331,7 +351,6 @@ class AnalysisService:
             }
             
         except Exception as e:
-            print(f"Error generating RAG answer: {e}")
             return {
                 "answer": "I encountered an error while processing your question.",
                 "sources": [],

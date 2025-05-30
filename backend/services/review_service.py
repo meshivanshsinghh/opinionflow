@@ -34,21 +34,30 @@ class ReviewExtractionService:
         
         comparison_id = self._generate_comparison_id(selected_products)
         
-        # checking cache using comparison_id
-        cached_reviews = await self._get_cached_reviews(comparison_id)
-        if cached_reviews: 
-            print(f"Cache hit! Found cached reviews for this product!")
-            return cached_reviews
         
+        # checking if reviews already exists
+        if await self.pinecone.check_comparison_exists(comparison_id):
+            all_reviews = await self.pinecone.search_reviews_by_comparison(
+                comparison_id=comparison_id,
+                question="product reviews",
+                top_k=1000
+            )
+            
+            cached_reviews = {}
+            for store in selected_products.keys():
+                cached_reviews[store] = [r for r in all_reviews if r.get("store") == store][:100]
+            
+            return cached_reviews
+
+        # Extract fresh reviews
         fresh_reviews = await self._extract_fresh_reviews(selected_products)
         
-        # storing reviews
-        # TODO: what if cache fails but content is still present, even then we are 
-        # saving the review right?
+        # Store individual review vectors
         await self._store_reviews_with_comparison_id(fresh_reviews, comparison_id, selected_products)
         
-        # caching reviews
-        await self._cache_reviews(comparison_id, fresh_reviews)
+        # Store lightweight cache flag
+        total_reviews = sum(len(store_reviews) for store_reviews in fresh_reviews.values())
+        await self.pinecone.cache_comparison_flag(comparison_id, total_reviews)
         
         return fresh_reviews
         
@@ -58,33 +67,27 @@ class ReviewExtractionService:
         
         for store in sorted(selected_products.keys()):
             product = selected_products[store]
-            
-            print(f'=======REVIEW SECTION========')
-            print(f'selected_products received are these: {selected_products}')
-            
             # using product id
             product_id = product.get("id", "")
-            print(f'product_id i generate is this', product_id)
             product_keys.append(f"{store.strip()}_{product_id.strip()}")
             
         # creating a hash
         comparison_key = "|".join(product_keys)
         comparison_hash = hashlib.md5(comparison_key.encode()).hexdigest()[:16]
         
-        print(f"Generated comparison ID: COMP_{comparison_hash}")
         return f"COMP_{comparison_hash}"
            
     # getting cached reviews
-    async def _get_cached_reviews(self, comparison_id: str) -> Optional[Dict[str, List[Dict]]]:
-        try:
-            ## TODO: pinecone code for search_comparison_cache
-            cached_data = await self.pinecone.search_comparison_cache(comparison_id)
-            if cached_data:
-                return cached_data
-            return None
-        except Exception as e:
-            print(f"Error checking cache: {e}")
-            return None
+    # async def _get_cached_reviews(self, comparison_id: str) -> Optional[Dict[str, List[Dict]]]:
+    #     try:
+    #         ## TODO: pinecone code for search_comparison_cache
+    #         cached_data = await self.pinecone.search_comparison_cache(comparison_id)
+    #         if cached_data:
+    #             return cached_data
+    #         return None
+    #     except Exception as e:
+    #         print(f"Error checking cache: {e}")
+    #         return None
                 
     # extracting fresh reviews
     async def _extract_fresh_reviews(self, selected_products: Dict[str, Dict]) -> Dict[str, List[Dict]]:
@@ -138,34 +141,34 @@ class ReviewExtractionService:
         except Exception as e: 
             print(f"Error storing reviews")
         
-    async def _cache_reviews(
-        self, 
-        comparison_id: str, 
-        reviews: Dict[str, List[Dict]]
-    ):
-        try:
-            cleaned_reviews = {}
-            for store, store_reviews in reviews.items(): 
-                cleaned_reviews[store] = []
+    # async def _cache_reviews(
+    #     self, 
+    #     comparison_id: str, 
+    #     reviews: Dict[str, List[Dict]]
+    # ):
+    #     try:
+    #         cleaned_reviews = {}
+    #         for store, store_reviews in reviews.items(): 
+    #             cleaned_reviews[store] = []
 
-                for review in store_reviews:
-                    cleaned_review = {
-                        "review_text": review.get("review_text", "")[:1000],
-                        "title": review.get("title", "")[:200],
-                        "rating": review.get("rating", 0),
-                        "review_date": review.get("review_date", ""),
-                        "helpful_votes": review.get("helpful_votes", 0),
-                        "product_name": review.get("product_name", "")[:200],
-                        "author_name": review.get("author_name", "")[:100],
-                        "verified_purchase": review.get("verified_purchase", False)
-                    }
-                    cleaned_reviews[store].append(cleaned_review)
+    #             for review in store_reviews:
+    #                 cleaned_review = {
+    #                     "review_text": review.get("review_text", "")[:1000],
+    #                     "title": review.get("title", "")[:200],
+    #                     "rating": review.get("rating", 0),
+    #                     "review_date": review.get("review_date", ""),
+    #                     "helpful_votes": review.get("helpful_votes", 0),
+    #                     "product_name": review.get("product_name", "")[:200],
+    #                     "author_name": review.get("author_name", "")[:100],
+    #                     "verified_purchase": review.get("verified_purchase", False)
+    #                 }
+    #                 cleaned_reviews[store].append(cleaned_review)
                     
-            # TODO: add this method to pinecone
-            await self.pinecone.cache_comparison_results(comparison_id, cleaned_reviews)
+    #         # TODO: add this method to pinecone
+    #         await self.pinecone.cache_comparison_results(comparison_id, cleaned_reviews)
             
-        except Exception as e: 
-            print("Error caching reviews")
+    #     except Exception as e: 
+    #         print("Error caching reviews")
     
     
     
