@@ -7,3 +7,5 @@ beautifulsoup4
 pinecone
 google-generativeai
 python-dotenv
+numpy
+huggingface_hub

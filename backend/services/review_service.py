@@ -105,9 +105,11 @@ class ReviewExtractionService:
         all_reviews = {}
         for(store, product), reviews in zip(selected_products.items(), results):
             if isinstance(reviews, Exception):
+                print(f"Error extracting reviews for {store}: {reviews}")
                 all_reviews[store] = []
             else:
                 all_reviews[store] = reviews[:100]
+                print(f"Successfully extractted {len(reviews)} reviews for {store}")
                 
         return all_reviews
     

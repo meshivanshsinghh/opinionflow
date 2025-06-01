@@ -38,9 +38,9 @@ class BrightDataClient:
         return f"{self.browserapi_username}:{self.browserapi_password}"
     
     # making request
-    @with_retry(max_retries=3)
+    @with_retry(max_retries=2)
     async def _make_request(self, url: str, zone: str, format: str = 'raw') -> str:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 'https://api.brightdata.com/request',
                 headers={
@@ -62,74 +62,106 @@ class BrightDataClient:
 
     # discovering urls
     async def discover(self, product: str, max_per_store: int = 5) -> Dict[str, List[str]]:
-        """Use SERP API to discover product URLs"""
+        """Use SERP API to discover product URLs with timeout"""
         stores = {
             "amazon": f"{product} site:amazon.com",
             "walmart": f"{product} site:walmart.com",
-            # "target": f"{product} site:target.com"
         }
 
         patterns = {
             "amazon": r'amazon\.com.*/(dp|gp/product)/[A-Z0-9]{10}',
             "walmart": r'walmart\.com/ip/[^/]+/\d+',
-            # "target": r'target\.com/p/[^/]+/-/A-\d+'
         }
 
-        async def search_store(store_name, query):
+        async def search_store_with_timeout(store_name, query):
             try:
-                encoded_query = quote_plus(query)
-                search_url = f"https://www.google.com/search?q={encoded_query}"
-                print(f"Searching for {store_name} products: {search_url}")
-
-                response_text = await self._make_request(
-                    url=search_url,
-                    zone=self.serp_zone,
-                    format='json'
-                )
-
-                response_data = json.loads(response_text)
-                html_content = response_data.get('body', '')
-
-                soup = BeautifulSoup(html_content, "html.parser")
-                all_links = [
-                    a.get('href') for a in soup.select('a[href]')
-                    if a.get('href') and a.get('href').startswith('http')
-                ]
-
-                product_urls = []
-                for url in all_links:
-                    if re.search(patterns.get(store_name, ''), url):
-                        clean_url = url.split('&utm_')[0].split('?utm_')[0]
-                        if clean_url not in product_urls:
-                            product_urls.append(clean_url)
-
-                print(f"Found {len(product_urls)} URLs for {store_name}")
-                return (store_name, product_urls[:max_per_store])
-            
+                async with asyncio.timeout(45):
+                    return await self._search_store(store_name, query, max_per_store, patterns)
+            except asyncio.TimeoutError:
+                print(f"Search timeout for {store_name}")
+                return (store_name, [])
             except Exception as e:
-                print(f"Error discovering {store_name} products: {str(e)}")
+                print(f"Error searching {store_name}: {e}")
                 return (store_name, [])
 
-        # Prepare all search tasks
+        # Run searches concurrently with timeout
         tasks = [
-            search_store(store_name, query)
+            search_store_with_timeout(store_name, query)
             for store_name, query in stores.items()
         ]
 
-        # Run all searches concurrently
-        results = await asyncio.gather(*tasks)
-
-        # Build the final results dict
-        return {store: urls for store, urls in results}
-
-
-    async def get_product_page(self, url: str) -> str:
         try:
+            async with asyncio.timeout(60):
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.TimeoutError:
+            print("Discovery phase timed out")
+            return {}
+
+        # Process results, handling exceptions
+        final_results = {}
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Store search failed: {result}")
+                continue
+            if isinstance(result, tuple) and len(result) == 2:
+                store, urls = result
+                final_results[store] = urls
+
+        return final_results
+
+    async def _search_store(self, store_name, query, max_per_store, patterns):
+        try:
+            encoded_query = quote_plus(query)
+            search_url = f"https://www.google.com/search?q={encoded_query}"
+            print(f"Searching for {store_name} products: {search_url}")
+
             response_text = await self._make_request(
-                url=url,
-                zone=self.webunlocker_zone,
+                url=search_url,
+                zone=self.serp_zone,
                 format='json'
             )
+
+            response_data = json.loads(response_text)
+            html_content = response_data.get('body', '')
+
+            if not html_content:
+                print(f"No HTML content received for {store_name}")
+                return (store_name, [])
+
+            soup = BeautifulSoup(html_content, "html.parser")
+            all_links = [
+                a.get('href') for a in soup.select('a[href]')
+                if a.get('href') and a.get('href').startswith('http')
+            ]
+
+            product_urls = []
+            pattern = patterns.get(store_name, '')
+            
+            for url in all_links:
+                if pattern and re.search(pattern, url):
+                    clean_url = url.split('&utm_')[0].split('?utm_')[0]
+                    if clean_url not in product_urls:
+                        product_urls.append(clean_url)
+                        
+                    # Stop early if we have enough URLs
+                    if len(product_urls) >= max_per_store:
+                        break
+
+            print(f"Found {len(product_urls)} URLs for {store_name}")
+            return (store_name, product_urls[:max_per_store])
+        
+        except Exception as e:
+            print(f"Error discovering {store_name} products: {str(e)}")
+            return (store_name, [])
+    
+    async def get_product_page(self, url: str) -> str:
+        try:
+            async with asyncio.timeout(25):
+                response_text = await self._make_request(
+                    url=url,
+                    zone=self.webunlocker_zone,
+                    format='json'
+                )
             
             # Parse JSON response
             response_data = json.loads(response_text)
@@ -142,6 +174,9 @@ class BrightDataClient:
                 
             return html_content
             
+        except asyncio.TimeoutError:
+            print(f"Timeout fetching product page: {url}")
+            raise
         except Exception as e:
             print(f"Error fetching product page: {str(e)}")
             raise

@@ -19,7 +19,11 @@ class AnalysisService:
             all_reviews = await self._get_comparison_reviews(comparison_id)
             
             if not all_reviews:
-                return {"error": "No reviews found for analysis"}
+                return {
+                    "error": "No reviews found for analysis",
+                    "comparison_id": comparison_id,
+                    "message": "Please try extracting reviews first or ensure the products have reviews available."
+                }
             
             # Perform parallel analysis
             tasks = [

@@ -15,16 +15,17 @@ class ReviewExtractionResponse(BaseModel):
     reviews: Dict[str, List[Dict]]
     total_reviews: int
     extraction_time_seconds: float
+    
 
-@router.post("/extract", response_model=ReviewExtractionResponse)
-async def extract_reviews(
+async def extract_reviews_handler(
     request: ReviewExtractionRequest,
     review_service: ReviewExtractionService = Depends(get_review_service)
 ):
-    
     start_time = time.time()
     
     try:
+        print(f"Extracting reviews for products: {list(request.selected_products.keys())}")
+        
         reviews = await review_service.extract_reviews_for_products(
             selected_products=request.selected_products
         )
@@ -38,4 +39,20 @@ async def extract_reviews(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        print(f"Error in review extraction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Handle both routes to prevent redirect issues
+@router.post("/extract", response_model=ReviewExtractionResponse)
+async def extract_reviews(
+    request: ReviewExtractionRequest,
+    review_service: ReviewExtractionService = Depends(get_review_service)
+):
+    return await extract_reviews_handler(request, review_service)
+
+@router.post("/extract/", response_model=ReviewExtractionResponse)
+async def extract_reviews_with_slash(
+    request: ReviewExtractionRequest,
+    review_service: ReviewExtractionService = Depends(get_review_service)
+):
+    return await extract_reviews_handler(request, review_service)

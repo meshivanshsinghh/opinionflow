@@ -5,8 +5,8 @@ from uuid import uuid4
 from pinecone import Pinecone, ServerlessSpec
 from core.config import get_settings
 from utils.retry import with_retry
-from sentence_transformers import SentenceTransformer
 import numpy as np
+from huggingface_hub import InferenceClient
 
 class PineconeService: 
     def __init__(self):
@@ -16,10 +16,10 @@ class PineconeService:
         self._indexes_initialized = False
         
         try:
-            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        except:
-            print('error loading embedding model')
-            self.embedding_model = None
+            self.hf_client = InferenceClient(api_key=self.settings.HUGGINGFACE_API_KEY)
+        except Exception as e:
+            print(f'Error initializing HuggingFace client: {e}')
+            self.hf_client = None
         
     async def _ensure_indexes_exist(self):
         if self._indexes_initialized:
@@ -55,45 +55,39 @@ class PineconeService:
      
     async def _generate_embedding(self, text: str) -> List[float]:
         try:
-            if self.embedding_model:
-                embedding = self.embedding_model.encode(text)
-                # padding or truncating to match the dimension
+            if self.hf_client:
+                # Use HuggingFace InferenceClient for feature extraction
+                result = self.hf_client.feature_extraction(
+                    text, 
+                    model="sentence-transformers/all-MiniLM-L6-v2"
+                )
+                
+                # Convert result to list if it's numpy array or tensor
+                if hasattr(result, 'tolist'):
+                    embedding = result.tolist()
+                else:
+                    embedding = list(result)
+                
+                # Handle 2D array (batch dimension)
+                if isinstance(embedding[0], list):
+                    embedding = embedding[0]
+                
+                # Ensure correct dimension
                 if len(embedding) > self.embedding_dimension:
                     embedding = embedding[:self.embedding_dimension]
                 elif len(embedding) < self.embedding_dimension:
-                    padding = np.zeros(self.embedding_dimension - len(embedding))
-                    embedding = np.concatenate([embedding, padding])
-                return embedding.tolist()
+                    padding = [0.0] * (self.embedding_dimension - len(embedding))
+                    embedding.extend(padding)
+                
+                return embedding
             else:
+                print('error doing embedding')
                 return self._simple_hash_embedding(text)
                     
         except Exception as e:
             print(f"Error generating embedding: {e}")
             return self._simple_hash_embedding(text)
-        # try:
-        #     # E5 large instruct model
-        #     payload = {"inputs": f"query: {text}"}
-        #     async with httpx.AsyncClient() as client:
-        #         response = await client.post(
-        #             "https://router.huggingface.co/hf-inference/models/intfloat/multilingual-e5-large-instruct/pipeline/feature-extraction",
-        #             headers={"Authorization": f"Bearer {self.settings.HUGGINGFACE_API_KEY}"},
-        #             json=payload
-        #         )
-                
-        #         if response.status_code == 200:
-        #             embedding = response.json()
-        #             if isinstance(embedding, list) and len(embedding) > 0:
-        #                 if isinstance(embedding[0], list):
-        #                     return embedding[0]
-        #                 return embedding
-        #             return [0.0] * 1024
-        #         else:
-        #             return self._simple_hash_embedding(text)
-                    
-        # except Exception as e:
-        #     print(f"Error generating embedding: {e}")
-        #     return self._simple_hash_embedding(text)
-           
+             
     def _simple_hash_embedding(self, text: str) -> List[float]:
         import hashlib
         

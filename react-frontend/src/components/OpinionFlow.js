@@ -91,7 +91,6 @@ const OpinionFlow = () => {
       const extractResponse = await apiClient.post(
         endpoints.extractReviews,
         {
-          session_id: sessionId,
           selected_products: selectedProducts,
         },
         { timeout: 120000 }
@@ -103,10 +102,9 @@ const OpinionFlow = () => {
       const analysisResponse = await apiClient.post(
         endpoints.analyzeReviews,
         {
-          session_id: sessionId,
           selected_products: selectedProducts,
         },
-        { timeout: 60000 }
+        { timeout: 120000 }
       );
 
       const analysisData = analysisResponse.data;

@@ -13,12 +13,13 @@ def create_application() -> FastAPI:
     app = FastAPI(
         title="OpinionFlow API",
         description="Real-time product review analysis across multiple stores",
-        version="1.0.0"
+        version="1.0.0",
+        redirect_slashes=False
     )
     
     # CORS
     app.add_middleware(
-        CORSMiddleware,
+         CORSMiddleware,
         allow_origins=[
             "http://localhost:3000",
             "http://localhost:3001", 
@@ -27,18 +28,9 @@ def create_application() -> FastAPI:
         ],
         allow_origin_regex=r"https://.*\.netlify\.app|https://.*\.vercel\.app",
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=[
-            "Accept",
-            "Accept-Language", 
-            "Content-Language",
-            "Content-Type",
-            "Authorization",
-            "X-Requested-With",
-            "X-CSRF-Token"
-        ],
-        expose_headers=["X-Total-Count", "X-Page-Count"],
-        max_age=3600,  # Cache preflight requests for 1 hour
+        allow_methods=["*"],   
+        allow_headers=["*"],
+        max_age=3600,
     )
 
     # Include routers

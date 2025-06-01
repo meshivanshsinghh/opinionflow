@@ -21,10 +21,21 @@ async def discover_products(
             max_per_store=settings.MAX_PRODUCTS_PER_STORE
         )
         return {"products": products} 
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=408,
+            detail="Request timed out. Please try again with a more specific search query."
+        )
     except OpinionFlowException as e:
         raise HTTPException(
             status_code=e.status_code,
             detail=e.details
+        )
+    except Exception as e:
+        print(f"Unexpected error in discover_products: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred during product discovery"
         )
 
 
@@ -35,10 +46,21 @@ async def add_custom_product(
 ):
     try:
         return await product_service.add_custom_product(url)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=408,
+            detail="Product extraction timed out. Please try again."
+        )
     except OpinionFlowException as e:
         raise HTTPException(
             status_code=e.status_code,
             detail=e.details
+        )
+    except Exception as e:
+        print(f"Unexpected error in add_custom_product: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while adding the product"
         )
 
 
@@ -58,4 +80,10 @@ async def select_product(
         raise HTTPException(
             status_code=e.status_code,
             detail=e.details
+        )
+    except Exception as e:
+        print(f"Unexpected error in select_product: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while selecting the product"
         )
