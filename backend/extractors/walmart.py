@@ -30,7 +30,7 @@ class WalmartExtractor(BaseProductExtractor):
                     except Exception:
                         price = None
 
-            # Rating & Review Count
+            # rating and review count
             rating, review_count = None, None
             reviews_block = soup.find("div", {"data-testid": "reviews-and-ratings"})
             if reviews_block:
@@ -51,13 +51,12 @@ class WalmartExtractor(BaseProductExtractor):
                 if count_match:
                     review_count = int(count_match.group(1))
 
-            # Image URL
+            # image url
             image_url = None
             img_el = soup.find("img", {"data-testid": "hero-image"})
             if img_el:
                 image_url = img_el.get("src")
             if not image_url:
-                # Fallback: look for media-thumbnail
                 thumb_div = soup.find("div", {"data-testid": "media-thumbnail"})
                 if thumb_div:
                     img_tag = thumb_div.find("img")

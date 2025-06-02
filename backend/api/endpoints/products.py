@@ -4,7 +4,9 @@ from services.product_service import ProductService
 from core.config import Settings, get_settings
 from models.product import Product
 from dependencies import get_product_service
-from api.schemas import DiscoverResponse, DiscoverUrlResponse, ProductQuery, Product, SelectedResponse
+from api.schemas import DiscoverResponse, ProductQuery, Product, SelectedResponse
+from typing import List 
+import asyncio
 
 router = APIRouter(tags=["products"])
 
@@ -16,11 +18,11 @@ async def discover_products(
     product_service: ProductService = Depends(get_product_service)
 ):
     try:
-        products = await product_service.discover_products(
+        products = await product_service.discover_products_fast(
             payload.query,
             max_per_store=settings.MAX_PRODUCTS_PER_STORE
         )
-        return {"products": products} 
+        return {"products": products}
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=408,
@@ -32,7 +34,7 @@ async def discover_products(
             detail=e.details
         )
     except Exception as e:
-        print(f"Unexpected error in discover_products: {e}")
+        print(f"Unexpected error in discover_products_fast: {e}")
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred during product discovery"
@@ -86,4 +88,19 @@ async def select_product(
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while selecting the product"
+        )
+        
+@router.post("/enhance-specifications")
+async def enhance_specifications(
+    product_ids: List[str] = Body(..., embed=True),
+    product_service: ProductService = Depends(get_product_service)
+):
+    try:
+        enhanced_products = await product_service.get_specifications_for_products(product_ids)
+        return {"enhanced_products": enhanced_products}
+    except Exception as e:
+        print(f"Unexpected error in enhance_specifications: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while enhancing specifications"
         )

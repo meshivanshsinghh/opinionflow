@@ -5,8 +5,8 @@ from uuid import uuid4
 from pinecone import Pinecone, ServerlessSpec
 from core.config import get_settings
 from utils.retry import with_retry
-import numpy as np
 from huggingface_hub import InferenceClient
+import hashlib
 
 class PineconeService: 
     def __init__(self):
@@ -56,23 +56,20 @@ class PineconeService:
     async def _generate_embedding(self, text: str) -> List[float]:
         try:
             if self.hf_client:
-                # Use HuggingFace InferenceClient for feature extraction
                 result = self.hf_client.feature_extraction(
                     text, 
                     model="sentence-transformers/all-MiniLM-L6-v2"
                 )
                 
-                # Convert result to list if it's numpy array or tensor
                 if hasattr(result, 'tolist'):
                     embedding = result.tolist()
                 else:
                     embedding = list(result)
                 
-                # Handle 2D array (batch dimension)
+                #handling 2d array
                 if isinstance(embedding[0], list):
                     embedding = embedding[0]
                 
-                # Ensure correct dimension
                 if len(embedding) > self.embedding_dimension:
                     embedding = embedding[:self.embedding_dimension]
                 elif len(embedding) < self.embedding_dimension:
@@ -89,21 +86,16 @@ class PineconeService:
             return self._simple_hash_embedding(text)
              
     def _simple_hash_embedding(self, text: str) -> List[float]:
-        import hashlib
         
-        # Create a simple but consistent embedding
         hash_obj = hashlib.md5(text.encode())
         hash_bytes = hash_obj.digest()
-        
-        # Convert to float vector
         embedding = []
         for i in range(0, len(hash_bytes), 4):
             chunk = hash_bytes[i:i+4]
             if len(chunk) == 4:
                 val = int.from_bytes(chunk, 'big') / (2**32)
                 embedding.append(val)
-        
-        # Pad or truncate to desired dimension
+
         while len(embedding) < self.embedding_dimension:
             embedding.extend(embedding[:min(len(embedding), self.embedding_dimension - len(embedding))])
         
@@ -111,10 +103,8 @@ class PineconeService:
     
     def _is_expired(self, expires_at) -> bool: 
         if isinstance(expires_at, (int, float)):
-            # Handle numeric timestamp
             return datetime.now().timestamp() > expires_at
         else:
-            # Handle ISO string (fallback)
             expiry_time = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
             return datetime.now(expiry_time.tzinfo) > expiry_time
     
@@ -123,12 +113,10 @@ class PineconeService:
     async def search_discovery_cache_exact(self, query: str) -> Optional[Dict[str, Any]]:
         await self._ensure_indexes_exist()
         try:
-            # Normalize the query for exact matching
             normalized_query = self._normalize_search_query(query)            
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             current_timestamp = datetime.now().timestamp()
             
-            # Use dummy vector with exact metadata filter
             results = index.query(
                 vector=[0.0] * self.embedding_dimension,
                 top_k=1,
@@ -192,8 +180,6 @@ class PineconeService:
         await self._ensure_indexes_exist()
         try:
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
-            
-            # Query with exact comparison_id filter
             results = index.query(
                 vector=[1.0] + [0.0] * (self.embedding_dimension - 1),
                 top_k=1,
@@ -223,15 +209,12 @@ class PineconeService:
             cache_id = str(uuid4())
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
             
-            
-            
-            # truncate review data to fit within size limits
             truncated_reviews = {}
             for store, store_reviews in reviews.items():
                 truncated_reviews[store] = []
                 for review in store_reviews:
                     truncated_review = {
-                         "review_text": review.get("review_text", "")[:500],  # Truncate to 500 chars
+                         "review_text": review.get("review_text", "")[:500],
                         "title": review.get("title", "")[:100],
                         "rating": review.get("rating", 0),
                         "review_date": review.get("review_date", ""),
@@ -244,13 +227,6 @@ class PineconeService:
                     truncated_reviews[store].append(truncated_review)
 
             dummy_embedding = [1.0] + [0.0] * (self.embedding_dimension - 1)
-            
-            # review_ids = []
-            # for store_reviews in reviews.values():
-            #     for review in store_reviews:
-            #         if "id" in review: 
-            #             review_ids.append(review["id"])
-                        
 
             metadata = {
                 "comparison_id": comparison_id,
@@ -287,12 +263,9 @@ class PineconeService:
                     
                 review_id = str(uuid4())
                 review_ids.append(review_id)
-                
-                # generating embedding for review content
                 review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
                 embedding = await self._generate_embedding(review_content)
                 
-                # Clean metadata - truncate to prevent size issues
                 metadata = {
                     "id": review_id,
                     "comparison_id": comparison_id,
@@ -314,7 +287,6 @@ class PineconeService:
                     "metadata": metadata
                 })
             
-            # Batch upsert (100 vectors at a time)
             for i in range(0, len(vectors), 100):
                 batch = vectors[i:i + 100]
                 index.upsert(vectors=batch)
@@ -357,94 +329,12 @@ class PineconeService:
         except Exception as e:
             print(f"Error searching reviews by comparison: {e}")
             return []
-
-    # ========== LEGACY SESSION-BASED METHODS (Keep for backward compatibility) ==========
-    # @with_retry(max_retries=3)
-    # async def store_reviews(self, reviews: List[Dict], session_id: str, product_id: str, store: str) -> List[str]:
-    #     await self._ensure_indexes_exist()
-    #     try:
-    #         index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
-    #         vectors = []
-    #         review_ids = []
-            
-    #         for review in reviews:
-    #             if not review.get("review_text"):
-    #                 continue
-                    
-    #             review_id = str(uuid4())
-    #             review_ids.append(review_id)
-                
-    #             # Create review text for embedding
-    #             review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
-    #             embedding = await self._generate_embedding(review_content)  # Add await
-                
-    #             # Clean metadata - ensure no null values
-    #             metadata = {
-    #                 "session_id": session_id,
-    #                 "product_id": product_id,
-    #                 "product_name": review.get("product_name") or "",
-    #                 "store": store,
-    #                 "review_text": review.get("review_text") or "",
-    #                 "title": review.get("title") or "",
-    #                 "rating": review.get("rating") or 0,
-    #                 "review_date": review.get("review_date") or "",
-    #                 "helpful_votes": review.get("helpful_votes") or 0,
-    #                 "timestamp": datetime.now().isoformat()
-    #             }
-                
-    #             vectors.append({
-    #                 "id": review_id,
-    #                 "values": embedding,
-    #                 "metadata": metadata
-    #             })
-            
-    #         # Batch upsert (100 vectors at a time)
-    #         for i in range(0, len(vectors), 100):
-    #             batch = vectors[i:i + 100]
-    #             index.upsert(vectors=batch)
-            
-    #         return review_ids
-            
-    #     except Exception as e:
-    #         print(f"Error storing reviews: {e}")
-    #         raise
-    
-    # @with_retry(max_retries=3)
-    # async def search_reviews_by_session(self, session_id: str, question: str, top_k: int = 20) -> List[Dict]:
-    #     await self._ensure_indexes_exist()
-    #     try:
-    #         question_embedding = await self._generate_embedding(question)  # Add await
-    #         index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
-            
-    #         results = index.query(
-    #             vector=question_embedding,
-    #             top_k=top_k,
-    #             include_metadata=True,
-    #             filter={"session_id": session_id}
-    #         )
-            
-    #         return [
-    #             {
-    #                 "review_text": match.metadata["review_text"],
-    #                 "title": match.metadata["title"],
-    #                 "rating": match.metadata["rating"],
-    #                 "store": match.metadata["store"],
-    #                 "product_name": match.metadata["product_name"],
-    #                 "similarity_score": match.score
-    #             }
-    #             for match in results.matches
-    #         ]
-            
-    #     except Exception as e:
-    #         print(f"Error searching reviews: {e}")
-    #         return []
     
     async def cleanup_expired_cache(self):
         await self._ensure_indexes_exist()
         try:
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
-            # Query for expired entries
             current_time = datetime.now().isoformat()
             results = index.query(
                 vector=[0] * self.embedding_dimension,
@@ -462,10 +352,7 @@ class PineconeService:
             print(f"Error cleaning up expired cache: {e}")
     
     def _normalize_search_query(self, query: str) -> str:
-        # Convert to lowercase, remove extra spaces, sort words
         words = query.lower().strip().split()
-        
-        # removing common stop words
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'for', 'with'}
         filtered_words = [word for word in words if word not in stop_words]
         
@@ -486,7 +373,7 @@ class PineconeService:
             
             metadata = {
                 "comparison_id": comparison_id,
-                "is_comparison_flag": True,  # Changed from cache to flag
+                "is_comparison_flag": True,
                 "review_count": review_count,
                 "timestamp": datetime.now().isoformat(),
                 "expires_at": (datetime.now() + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp(),

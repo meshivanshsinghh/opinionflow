@@ -42,7 +42,6 @@ async def extract_reviews_handler(
         print(f"Error in review extraction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Handle both routes to prevent redirect issues
 @router.post("/extract", response_model=ReviewExtractionResponse)
 async def extract_reviews(
     request: ReviewExtractionRequest,

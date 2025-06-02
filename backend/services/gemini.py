@@ -40,17 +40,14 @@ class GeminiModel:
         prompt += f"Return JSON array with exactly {len(products)} objects, one for each product in order:"
         
         try:
-            # Add timeout to Gemini call
-            async with asyncio.timeout(30):
+            async with asyncio.timeout(25):
                 response = self.model.generate_content(prompt)
                 result = json.loads(response.text)
                 
-                # Validate result length matches input
                 if len(result) == len(products):
                     return result
                 else:
                     print(f"Gemini returned {len(result)} specs for {len(products)} products")
-                    # Pad or truncate to match expected length
                     if len(result) < len(products):
                         result.extend([{}] * (len(products) - len(result)))
                     else:
@@ -70,7 +67,7 @@ class GeminiModel:
     async def generate_content(self, prompt: str) -> any:
         """Generate content using Gemini model with timeout"""
         try:
-            async with asyncio.timeout(45):  # 45 seconds timeout
+            async with asyncio.timeout(45):
                 response = self.model.generate_content(prompt)
                 return response
         except asyncio.TimeoutError:

@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 import json
 import hashlib
 from datetime import datetime
@@ -25,7 +25,6 @@ class AnalysisService:
                     "message": "Please try extracting reviews first or ensure the products have reviews available."
                 }
             
-            # Perform parallel analysis
             tasks = [
                 self._analyze_sentiment(all_reviews),
                 self._extract_pros_cons(all_reviews),
@@ -101,17 +100,6 @@ class AnalysisService:
     
     async def _get_comparison_reviews(self, comparison_id: str) -> List[Dict]:
         try:
-            # getting cached reviews first
-            # cached_reviews = await self.pinecone.search_comparison_cache(comparison_id)
-            # if cached_reviews: 
-            #     all_reviews = []
-            #     for store, store_reviews in cached_reviews.items():
-            #         for review in store_reviews:
-            #             review["store"] = store
-            #             all_reviews.append(review)
-            #     return all_reviews
-            
-            # Just search individual review vectors directly
             reviews = await self.pinecone.search_reviews_by_comparison(
                 comparison_id=comparison_id,
                 question="product review analysis",
@@ -325,11 +313,9 @@ class AnalysisService:
             """
             response = await self.gemini.generate_content(prompt)
             
-            # Add proper JSON parsing with error handling
             try:
                 result = json.loads(response.text)
             except json.JSONDecodeError as json_error:
-                # Try to extract answer from raw text as fallback
                 return {
                     "answer": response.text if response.text else "I couldn't generate a proper answer.",
                     "sources": [],

@@ -1,10 +1,7 @@
-from unittest import result
 from services.brightdata import BrightDataClient
 from services.pinecone_service import PineconeService
 from core.config import get_settings
 from services.gemini import GeminiModel
-from datetime import datetime, timedelta
-from uuid import uuid4
 import json 
 import httpx
 from bs4 import BeautifulSoup
@@ -12,11 +9,6 @@ from typing import Dict, List, Optional
 import hashlib
 import re
 import asyncio 
-
-
-# TODO: don't want to store two duplicate entries for the same review
-# if query discovery cache fails and we are fetching the same review then 
-# i don't want to store the same again. 
 
 class ReviewExtractionService:
     def __init__(self):
@@ -49,13 +41,9 @@ class ReviewExtractionService:
             
             return cached_reviews
 
-        # Extract fresh reviews
         fresh_reviews = await self._extract_fresh_reviews(selected_products)
-        
-        # Store individual review vectors
         await self._store_reviews_with_comparison_id(fresh_reviews, comparison_id, selected_products)
         
-        # Store lightweight cache flag
         total_reviews = sum(len(store_reviews) for store_reviews in fresh_reviews.values())
         await self.pinecone.cache_comparison_flag(comparison_id, total_reviews)
         
@@ -67,7 +55,6 @@ class ReviewExtractionService:
         
         for store in sorted(selected_products.keys()):
             product = selected_products[store]
-            # using product id
             product_id = product.get("id", "")
             product_keys.append(f"{store.strip()}_{product_id.strip()}")
             
@@ -76,18 +63,7 @@ class ReviewExtractionService:
         comparison_hash = hashlib.md5(comparison_key.encode()).hexdigest()[:16]
         
         return f"COMP_{comparison_hash}"
-           
-    # getting cached reviews
-    # async def _get_cached_reviews(self, comparison_id: str) -> Optional[Dict[str, List[Dict]]]:
-    #     try:
-    #         ## TODO: pinecone code for search_comparison_cache
-    #         cached_data = await self.pinecone.search_comparison_cache(comparison_id)
-    #         if cached_data:
-    #             return cached_data
-    #         return None
-    #     except Exception as e:
-    #         print(f"Error checking cache: {e}")
-    #         return None
+    
                 
     # extracting fresh reviews
     async def _extract_fresh_reviews(self, selected_products: Dict[str, Dict]) -> Dict[str, List[Dict]]:
@@ -131,7 +107,6 @@ class ReviewExtractionService:
                         batch_reviews = store_reviews[i:i + batch_size]
                         
                         try:
-                            # TODO: add this method of store_comparison_review in pinecone
                             await self.pinecone.store_comparison_reviews(
                                 reviews = batch_reviews, 
                                 comparison_id = comparison_id, 
@@ -142,37 +117,6 @@ class ReviewExtractionService:
                             continue
         except Exception as e: 
             print(f"Error storing reviews")
-        
-    # async def _cache_reviews(
-    #     self, 
-    #     comparison_id: str, 
-    #     reviews: Dict[str, List[Dict]]
-    # ):
-    #     try:
-    #         cleaned_reviews = {}
-    #         for store, store_reviews in reviews.items(): 
-    #             cleaned_reviews[store] = []
-
-    #             for review in store_reviews:
-    #                 cleaned_review = {
-    #                     "review_text": review.get("review_text", "")[:1000],
-    #                     "title": review.get("title", "")[:200],
-    #                     "rating": review.get("rating", 0),
-    #                     "review_date": review.get("review_date", ""),
-    #                     "helpful_votes": review.get("helpful_votes", 0),
-    #                     "product_name": review.get("product_name", "")[:200],
-    #                     "author_name": review.get("author_name", "")[:100],
-    #                     "verified_purchase": review.get("verified_purchase", False)
-    #                 }
-    #                 cleaned_reviews[store].append(cleaned_review)
-                    
-    #         # TODO: add this method to pinecone
-    #         await self.pinecone.cache_comparison_results(comparison_id, cleaned_reviews)
-            
-    #     except Exception as e: 
-    #         print("Error caching reviews")
-    
-    
     
     
     # ========== EXTRACTING AMAZON AND WALMART REVIEWS ============
@@ -320,32 +264,32 @@ class ReviewExtractionService:
     # extrating walmart content scraping
     def _parse_walmart_review_container(self, container, product_name: str) -> Optional[Dict]:
         try:
-            # Extract date
+            # extracting date
             date_elem = container.find("div", class_=lambda x: x and "f7" in x and "gray" in x and "flex" in x and "justify-end" in x)
             if not date_elem:
                 date_elem = container.find("div", class_="f7 gray flex flex-auto flex-none-l tr tl-l justify-end justify-start-l")
             review_date = date_elem.get_text(strip=True) if date_elem else ""
             
-            # Extract reviewer name
+            # extracting reviewer name
             name_elem = container.find("span", class_=lambda x: x and "f7" in x and "b" in x and "mv0" in x)
             if not name_elem:
                 name_elem = container.find("span", class_="f7 b mv0")
             reviewer_name = name_elem.get_text(strip=True) if name_elem else ""
             
-            # Extract rating
+            # extracting rating
             star_container = container.find("div", class_=lambda x: x and "w_ExHd" in x and "w_y6ym" in x)
             rating = 0
             if star_container:
                 filled_stars = star_container.find_all("svg", class_=lambda x: x and "w_1jp4" in x)
                 rating = len(filled_stars)
             
-            # Extract review title
+            # extracting review title
             title_elem = container.find("h3", class_=lambda x: x and "w_kV33" in x and "w_Sl3f" in x and "w_mvVb" in x)
             if not title_elem:
                 title_elem = container.find("h3", class_="w_kV33 w_Sl3f w_mvVb f5 b")
             review_title = title_elem.get_text(strip=True) if title_elem else ""
             
-            # Extract review text
+            # extracting review text
             text_container = container.find("span", class_=lambda x: x and "tl-m" in x and "db-m" in x)
             review_text = ""
             if text_container:
@@ -353,7 +297,7 @@ class ReviewExtractionService:
                     b_tag.decompose()
                 review_text = text_container.get_text(strip=True)
             
-            # Extract helpful votes
+            # extracting helpful votes
             helpful_votes = 0
             upvote_buttons = container.find_all("button", {"aria-label": lambda x: x and "Upvote" in x})
             for upvote_button in upvote_buttons:
@@ -365,7 +309,7 @@ class ReviewExtractionService:
                         helpful_votes = int(vote_match.group(1))
                         break
             
-            # Extract verified purchase status
+            # extracting verified purchase status
             verified_purchase = False
             verified_elems = container.find_all("span", class_=lambda x: x and "b" in x and "f7" in x and "dark-gray" in x)
             for elem in verified_elems:

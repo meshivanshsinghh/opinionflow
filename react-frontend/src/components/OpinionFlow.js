@@ -1,15 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { v4 as uuidv4 } from "uuid";
-import axios from "axios";
-import {
-  Search,
-  ShoppingCart,
-  BarChart3,
-  MessageCircle,
-  Loader2,
-} from "lucide-react";
+import { Search, ShoppingCart, BarChart3, MessageCircle } from "lucide-react";
 import ProductSearch from "./ProductSearch";
 import ProductSelection from "./ProductSelection";
 import AnalysisResults from "./AnalysisResults";
@@ -17,7 +9,6 @@ import ChatInterface from "./ChatInterface";
 import { apiClient, endpoints, handleApiError } from "../utils/api";
 
 const OpinionFlow = () => {
-  const [sessionId] = useState(() => uuidv4());
   const [selectedProducts, setSelectedProducts] = useState({});
   const [analysisResults, setAnalysisResults] = useState(null);
   const [productsData, setProductsData] = useState({});
@@ -37,7 +28,7 @@ const OpinionFlow = () => {
 
     try {
       const response = await apiClient.post(
-        `${endpoints.discover}`,
+        endpoints.discover,
         { query, max_per_store: maxPerStore },
         { timeout: 60000 }
       );

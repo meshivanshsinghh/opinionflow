@@ -1,5 +1,4 @@
 from core.config import get_settings
-from core.exceptions import ExtractionError
 from utils.retry import with_retry
 import httpx
 from bs4 import BeautifulSoup
@@ -17,26 +16,7 @@ class BrightDataClient:
         self.api_key = settings.BRIGHT_DATA_API_KEY
         self.serp_zone = settings.BRIGHT_DATA_SERP_ZONE
         self.webunlocker_zone = settings.BRIGHT_DATA_WEBUNLOCKER_ZONE   
-
-        # # Proxy based auth
-        # self.host = settings.BRIGHT_DATA_HOST
-        # self.port = settings.BRIGHT_DATA_PORT
-        # # Serp zone credentials 
-        # self.serp_username = settings.BRIGHT_DATA_SERP_USERNAME
-        # self.serp_password = settings.BRIGHT_DATA_SERP_PASSWORD
-
-        # # web unlocker credentials
-        # self.webunlocker_username = settings.BRIGHT_DATA_WEBUNLOCKER_USERNAME
-        # self.webunlocker_password = settings.BRIGHT_DATA_WEBUNLOCKER_PASSWORD
         
-        # browser api credentials
-        self.browserapi_username = settings.BRIGHT_DATA_BROWSER_API_USERNAME
-        self.browserapi_password = settings.BRIGHT_DATA_BROWSER_API_PASSWORD
-        
-    @property
-    def auth(self):
-        return f"{self.browserapi_username}:{self.browserapi_password}"
-    
     # making request
     @with_retry(max_retries=2)
     async def _make_request(self, url: str, zone: str, format: str = 'raw') -> str:
@@ -84,7 +64,6 @@ class BrightDataClient:
                 print(f"Error searching {store_name}: {e}")
                 return (store_name, [])
 
-        # Run searches concurrently with timeout
         tasks = [
             search_store_with_timeout(store_name, query)
             for store_name, query in stores.items()
@@ -97,7 +76,6 @@ class BrightDataClient:
             print("Discovery phase timed out")
             return {}
 
-        # Process results, handling exceptions
         final_results = {}
         for result in results:
             if isinstance(result, Exception):
@@ -143,7 +121,6 @@ class BrightDataClient:
                     if clean_url not in product_urls:
                         product_urls.append(clean_url)
                         
-                    # Stop early if we have enough URLs
                     if len(product_urls) >= max_per_store:
                         break
 

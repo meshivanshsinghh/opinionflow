@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from models.product import Product
 import httpx
 from utils.retry import with_retry
-from typing import Optional
 
 
 class BaseProductExtractor(ABC):
