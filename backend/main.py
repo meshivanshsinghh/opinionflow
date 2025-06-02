@@ -17,9 +17,14 @@ def create_application() -> FastAPI:
         redirect_slashes=False
     )
     
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        from dependencies import cleanup_bd_client
+        await cleanup_bd_client()
+        
     # CORS
     app.add_middleware(
-         CORSMiddleware,
+        CORSMiddleware,
         allow_origins=[
             "http://localhost:3000",
             "http://localhost:3001", 

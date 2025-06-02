@@ -7,6 +7,10 @@ from services.analysis_service import AnalysisService
 def get_bd_client() -> BrightDataClient:
     return BrightDataClient()
 
+async def cleanup_bd_client():
+    client = get_bd_client()
+    await client.close()
+    
 @lru_cache
 def get_proxy_url() -> str:
     client = get_bd_client()

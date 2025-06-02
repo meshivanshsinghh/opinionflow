@@ -22,8 +22,6 @@ class GeminiModel:
         )
     
     async def batch_extract_specifications(self, products: list[dict]) -> list[dict]:
-        if len(products) > 10:
-            print(f"Large batch ({len(products)} products), this should be chunked")
         
         # Optimize prompt to be more concise
         prompt = (
@@ -47,7 +45,6 @@ class GeminiModel:
                 if len(result) == len(products):
                     return result
                 else:
-                    print(f"Gemini returned {len(result)} specs for {len(products)} products")
                     if len(result) < len(products):
                         result.extend([{}] * (len(products) - len(result)))
                     else:
@@ -55,24 +52,23 @@ class GeminiModel:
                     return result
                     
         except asyncio.TimeoutError:
-            print("Gemini request timed out")
             return [{} for _ in products]
         except json.JSONDecodeError as e:
-            print(f"Gemini JSON parse error: {e}")
             return [{} for _ in products]
         except Exception as e:
-            print(f"Gemini error: {e}")
             return [{} for _ in products]
 
     async def generate_content(self, prompt: str) -> any:
-        """Generate content using Gemini model with timeout"""
-        try:
-            async with asyncio.timeout(45):
+        try:            
+            async with asyncio.timeout(25):
                 response = self.model.generate_content(prompt)
+                if not response or not hasattr(response, 'text'):
+                    raise Exception("Invalid response from Gemini - no text attribute")
+                if not response.text or response.text.strip() == "":
+                    raise Exception("Empty response from Gemini")
                 return response
+                
         except asyncio.TimeoutError:
-            print("Gemini content generation timed out")
-            raise
+            raise Exception("Gemini API timeout after 20 seconds")
         except Exception as e:
-            print(f"Gemini generation error: {e}")
-            raise
+            raise Exception(f"Gemini API error: {str(e)}")

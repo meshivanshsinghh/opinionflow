@@ -42,11 +42,14 @@ class ReviewExtractionService:
             return cached_reviews
 
         fresh_reviews = await self._extract_fresh_reviews(selected_products)
-        await self._store_reviews_with_comparison_id(fresh_reviews, comparison_id, selected_products)
-        
-        total_reviews = sum(len(store_reviews) for store_reviews in fresh_reviews.values())
-        await self.pinecone.cache_comparison_flag(comparison_id, total_reviews)
-        
+        try:
+            await self._store_reviews_with_comparison_id(fresh_reviews, comparison_id, selected_products)
+            
+            total_reviews = sum(len(store_reviews) for store_reviews in fresh_reviews.values())
+            await self.pinecone.cache_comparison_flag(comparison_id, total_reviews)
+                        
+        except Exception as e:
+            print("Returning fresh reviews without caching due to storage failure")
         return fresh_reviews
         
     # generating comparison id
@@ -97,28 +100,53 @@ class ReviewExtractionService:
         selected_products: Dict[str, Dict]
     ):
         try:
+            store_tasks = []
+            
             for store, store_reviews in reviews.items():
                 if store in selected_products and store_reviews:
                     product = selected_products[store]
-                    
-                    # processing in batch size of 20
-                    batch_size = 20
-                    for i in range(0, len(store_reviews), batch_size):
-                        batch_reviews = store_reviews[i:i + batch_size]
-                        
-                        try:
-                            await self.pinecone.store_comparison_reviews(
-                                reviews = batch_reviews, 
-                                comparison_id = comparison_id, 
-                                product_id = product["id"],
-                                store = store,
-                            )
-                        except Exception as e: 
-                            continue
+                    store_tasks.append(
+                        self._store_store_reviews(store_reviews, comparison_id, product["id"], store)
+                    )
+            
+            results = await asyncio.gather(*store_tasks, return_exceptions=True)
+
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    store_name = list(reviews.keys())[i]
+                    print(f"ERROR: Failed to store reviews for {store_name}: {result}")
+                    raise result
+            
         except Exception as e: 
-            print(f"Error storing reviews")
+            raise
     
-    
+    async def _store_store_reviews(self, store_reviews: List[Dict], comparison_id: str, product_id: str, store: str):
+        try:
+            batch_size = 50 
+            batch_tasks = []
+            
+            for i in range(0, len(store_reviews), batch_size):
+                batch_reviews = store_reviews[i:i + batch_size]
+                batch_tasks.append(
+                    self.pinecone.store_comparison_reviews(
+                        reviews=batch_reviews, 
+                        comparison_id=comparison_id, 
+                        product_id=product_id,
+                        store=store,
+                    )
+                )
+            
+            results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+        
+            # Add error checking
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    raise result        
+            
+        except Exception as e:
+            raise
+        
+        
     # ========== EXTRACTING AMAZON AND WALMART REVIEWS ============
     async def _extract_amazon_reviews(self, product: Dict) -> List[Dict]:
         try:
@@ -176,13 +204,17 @@ class ReviewExtractionService:
             first_page_url = f"https://www.walmart.com/reviews/product/{product_id}?entryPoint=viewAllReviewsBottom"
             first_page_html = await self.bright_data.get_product_page(first_page_url)
             total_pages = self._get_walmart_total_pages(first_page_html)
-            max_pages = min(total_pages, 10)
+            max_pages = min(total_pages, 5)
             
-            page_tasks = []
-            for page in range(1, max_pages + 1): 
-                page_url = f"https://www.walmart.com/reviews/product/{product_id}?entryPoint=viewAllReviewsBottom&page={page}"
-                page_tasks.append(self._extract_walmart_page_reviews_bs(page_url, product["name"]))
-                
+            semaphore = asyncio.Semaphore(3)
+            
+            async def extract_page_with_semaphore(page):
+                async with semaphore:
+                    page_url = f"https://www.walmart.com/reviews/product/{product_id}?entryPoint=viewAllReviewsBottom&page={page}"
+                    return await self._extract_walmart_page_reviews_bs(page_url, product["name"])
+            
+        
+            page_tasks = [extract_page_with_semaphore(page) for page in range(1, max_pages + 1)]
             page_results = await asyncio.gather(*page_tasks, return_exceptions=True)
 
             all_reviews = []
@@ -336,11 +368,16 @@ class ReviewExtractionService:
             return None
         
     # checking the status of snapshot and adding a poll mechanism
-    async def _poll_amazon_results(self, snapshot_id: str, max_wait: int = 300) -> List[Dict]:
+    async def _poll_amazon_results(self, snapshot_id: str, max_wait: int = 120) -> List[Dict]:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                for attempt in range(max_wait // 5):
-                    print(f"Polling Amazon snapshot {snapshot_id}, attempt {attempt + 1}")
+                intervals = [2, 2, 3, 5, 5, 10, 10, 15, 15, 20]
+                
+                for i, interval in enumerate(intervals):
+                    if sum(intervals[:i+1]) >= max_wait:
+                        break
+                
+                    print(f"Polling Amazon snapshot {snapshot_id}, attempt {i + 1}")
                     
                     response = await client.get(
                         f"https://api.brightdata.com/datasets/v3/snapshot/{snapshot_id}",
@@ -353,12 +390,11 @@ class ReviewExtractionService:
                             reviews_data = response.json()
                             if isinstance(reviews_data, list) and len(reviews_data) > 0:
                                 return reviews_data
-                            else:
-                                print("Snapshot not ready yet, continuing to poll...")
                         except json.JSONDecodeError as e:
                             print(f"JSON decode error: {e}")
-                    
-                    await asyncio.sleep(10)
+                
+                    await asyncio.sleep(interval)
+                
                 return []
                 
         except Exception as e:

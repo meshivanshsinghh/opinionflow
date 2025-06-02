@@ -69,14 +69,14 @@ async def add_custom_product(
 @router.post("/{store}/select/{product_id}", response_model=SelectedResponse)
 async def select_product(
     store: str,
-    product_id: str,
+    product: Product = Body(...),
     product_service: ProductService = Depends(get_product_service)
 ):
     """
     Select a product for a specific store.
     """
     try:
-        product_service.select_product(store, product_id)
+        product_service.select_product(store, product)
         return {"selected": product_service.get_selected_products()}
     except OpinionFlowException as e:
         raise HTTPException(
