@@ -282,3 +282,41 @@ class ProductService:
                 for prod in products
             ]
         return results
+
+    async def get_specifications_for_products(self, product_ids: List[str]) -> Dict[str, Dict]:
+        enhanced_products = {}
+        products_needing_specs = []
+        for product_id in product_ids:
+            if product_id in self.product_store:
+                stored_product = self.product_store[product_id]["product"]
+                if stored_product.specifications:
+                    enhanced_products[product_id] = stored_product.specifications
+                    print(f"Using cached specs for product {product_id}")
+                else:
+                    raw_data = self.product_store[product_id]["raw_data"]
+                    products_needing_specs.append(raw_data)
+                    print(f"Need to process specs for product {product_id}")
+            else:
+                print(f"Product {product_id} not found in store")
+                enhanced_products[product_id] = {}
+        
+        if products_needing_specs:
+            print(f"Processing specifications for {len(products_needing_specs)} products")
+            try:
+                specs = await self._batch_extract_with_chunking(products_needing_specs)
+                
+                for i, prod in enumerate(products_needing_specs):
+                    spec_data = specs[i] if i < len(specs) else {}
+                    enhanced_products[prod["id"]] = spec_data
+                    
+                    if prod["id"] in self.product_store:
+                        self.product_store[prod["id"]]["product"].specifications = spec_data
+                        self.product_store[prod["id"]]["raw_data"]["specifications"] = spec_data
+                        
+            except Exception as e:
+                print(f"Error enhancing specifications: {e}")
+                for prod in products_needing_specs:
+                    enhanced_products[prod["id"]] = {}
+        
+        print(f"Returning specs for {len(enhanced_products)} products")
+        return enhanced_products

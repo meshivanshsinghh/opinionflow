@@ -18,6 +18,7 @@ export const endpoints = {
   extractReviews: "reviews/extract",
   analyzeReviews: "analysis/analyze",
   askQuestion: "analysis/question",
+  enhanceSpecifications: "products/enhance-specifications",
 };
 
 // Error handling utility function

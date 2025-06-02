@@ -97,7 +97,15 @@ async def enhance_specifications(
 ):
     try:
         enhanced_products = await product_service.get_specifications_for_products(product_ids)
-        return {"enhanced_products": enhanced_products}
+        
+        products_with_specs = sum(1 for specs in enhanced_products.values() if specs)
+        
+        return {
+            "enhanced_products": enhanced_products,
+            "total_products": len(product_ids),
+            "products_with_specs": products_with_specs,
+            "success": True
+        }
     except Exception as e:
         print(f"Unexpected error in enhance_specifications: {e}")
         raise HTTPException(

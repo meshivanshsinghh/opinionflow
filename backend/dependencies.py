@@ -13,6 +13,7 @@ def get_proxy_url() -> str:
     return client.proxy_url
 
 
+@lru_cache
 def get_product_service():
     from services.product_service import ProductService
     return ProductService(bright_data_client=get_bd_client())
