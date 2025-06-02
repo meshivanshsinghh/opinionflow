@@ -14,6 +14,7 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
   const specs = product.specifications || {};
   const imageUrl =
     product.image_url || "https://via.placeholder.com/100x100?text=No+Image";
+  const hasSpecs = Object.keys(specs).length > 0;
 
   // Create star rating
   const stars = Array.from({ length: 5 }, (_, i) => (
@@ -28,14 +29,22 @@ const ProductCard = ({ product, store, isSelected, onSelect }) => {
   ));
 
   // Create spec tags (limit to 2 for compact layout)
-  const specTags = Object.entries(specs).map(([key, value]) => (
-    <span
-      key={key}
-      className="inline-block bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs mr-1 mb-1"
-    >
-      {key}: {value}
+  const specTags = hasSpecs ? (
+    Object.entries(specs)
+      .slice(0, 3)
+      .map(([key, value]) => (
+        <span
+          key={key}
+          className="inline-block bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs mr-1 mb-1"
+        >
+          {key}: {value}
+        </span>
+      ))
+  ) : (
+    <span className="inline-block bg-gray-50 text-gray-400 px-2 py-1 rounded text-xs">
+      Loading specs...
     </span>
-  ));
+  );
 
   return (
     <div
@@ -202,6 +211,8 @@ const ProductSelection = ({
   onAnalyze,
   loading,
   status,
+  specsLoading,
+  specsStatus,
 }) => {
   const hasProducts = Object.values(productsData).some(
     (products) => products && products.length > 0
@@ -218,7 +229,27 @@ const ProductSelection = ({
 
   return (
     <div className="space-y-6">
-      {/* Store Sections */}
+      {specsStatus && (
+        <div
+          className={`p-3 rounded-lg border-l-4 text-sm ${
+            specsStatus.includes("❌") || specsStatus.includes("⚠️")
+              ? "bg-yellow-50 border-yellow-400 text-yellow-800"
+              : specsStatus.includes("🔧")
+              ? "bg-blue-50 border-blue-400 text-blue-800"
+              : "bg-green-50 border-green-400 text-green-800"
+          }`}
+        >
+          {specsLoading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>{specsStatus}</span>
+            </div>
+          ) : (
+            <span>{specsStatus}</span>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {Object.entries(productsData).map(([store, products]) => (
           <StoreSection

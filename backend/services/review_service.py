@@ -1,10 +1,7 @@
-from unittest import result
 from services.brightdata import BrightDataClient
 from services.pinecone_service import PineconeService
 from core.config import get_settings
 from services.gemini import GeminiModel
-from datetime import datetime, timedelta
-from uuid import uuid4
 import json 
 import httpx
 from bs4 import BeautifulSoup
@@ -12,11 +9,6 @@ from typing import Dict, List, Optional
 import hashlib
 import re
 import asyncio 
-
-
-# TODO: don't want to store two duplicate entries for the same review
-# if query discovery cache fails and we are fetching the same review then 
-# i don't want to store the same again. 
 
 class ReviewExtractionService:
     def __init__(self):
@@ -49,16 +41,15 @@ class ReviewExtractionService:
             
             return cached_reviews
 
-        # Extract fresh reviews
         fresh_reviews = await self._extract_fresh_reviews(selected_products)
-        
-        # Store individual review vectors
-        await self._store_reviews_with_comparison_id(fresh_reviews, comparison_id, selected_products)
-        
-        # Store lightweight cache flag
-        total_reviews = sum(len(store_reviews) for store_reviews in fresh_reviews.values())
-        await self.pinecone.cache_comparison_flag(comparison_id, total_reviews)
-        
+        try:
+            await self._store_reviews_with_comparison_id(fresh_reviews, comparison_id, selected_products)
+            
+            total_reviews = sum(len(store_reviews) for store_reviews in fresh_reviews.values())
+            await self.pinecone.cache_comparison_flag(comparison_id, total_reviews)
+                        
+        except Exception as e:
+            print("Returning fresh reviews without caching due to storage failure")
         return fresh_reviews
         
     # generating comparison id
@@ -67,7 +58,6 @@ class ReviewExtractionService:
         
         for store in sorted(selected_products.keys()):
             product = selected_products[store]
-            # using product id
             product_id = product.get("id", "")
             product_keys.append(f"{store.strip()}_{product_id.strip()}")
             
@@ -76,18 +66,7 @@ class ReviewExtractionService:
         comparison_hash = hashlib.md5(comparison_key.encode()).hexdigest()[:16]
         
         return f"COMP_{comparison_hash}"
-           
-    # getting cached reviews
-    # async def _get_cached_reviews(self, comparison_id: str) -> Optional[Dict[str, List[Dict]]]:
-    #     try:
-    #         ## TODO: pinecone code for search_comparison_cache
-    #         cached_data = await self.pinecone.search_comparison_cache(comparison_id)
-    #         if cached_data:
-    #             return cached_data
-    #         return None
-    #     except Exception as e:
-    #         print(f"Error checking cache: {e}")
-    #         return None
+    
                 
     # extracting fresh reviews
     async def _extract_fresh_reviews(self, selected_products: Dict[str, Dict]) -> Dict[str, List[Dict]]:
@@ -121,60 +100,53 @@ class ReviewExtractionService:
         selected_products: Dict[str, Dict]
     ):
         try:
+            store_tasks = []
+            
             for store, store_reviews in reviews.items():
                 if store in selected_products and store_reviews:
                     product = selected_products[store]
-                    
-                    # processing in batch size of 20
-                    batch_size = 20
-                    for i in range(0, len(store_reviews), batch_size):
-                        batch_reviews = store_reviews[i:i + batch_size]
-                        
-                        try:
-                            # TODO: add this method of store_comparison_review in pinecone
-                            await self.pinecone.store_comparison_reviews(
-                                reviews = batch_reviews, 
-                                comparison_id = comparison_id, 
-                                product_id = product["id"],
-                                store = store,
-                            )
-                        except Exception as e: 
-                            continue
-        except Exception as e: 
-            print(f"Error storing reviews")
-        
-    # async def _cache_reviews(
-    #     self, 
-    #     comparison_id: str, 
-    #     reviews: Dict[str, List[Dict]]
-    # ):
-    #     try:
-    #         cleaned_reviews = {}
-    #         for store, store_reviews in reviews.items(): 
-    #             cleaned_reviews[store] = []
-
-    #             for review in store_reviews:
-    #                 cleaned_review = {
-    #                     "review_text": review.get("review_text", "")[:1000],
-    #                     "title": review.get("title", "")[:200],
-    #                     "rating": review.get("rating", 0),
-    #                     "review_date": review.get("review_date", ""),
-    #                     "helpful_votes": review.get("helpful_votes", 0),
-    #                     "product_name": review.get("product_name", "")[:200],
-    #                     "author_name": review.get("author_name", "")[:100],
-    #                     "verified_purchase": review.get("verified_purchase", False)
-    #                 }
-    #                 cleaned_reviews[store].append(cleaned_review)
-                    
-    #         # TODO: add this method to pinecone
-    #         await self.pinecone.cache_comparison_results(comparison_id, cleaned_reviews)
+                    store_tasks.append(
+                        self._store_store_reviews(store_reviews, comparison_id, product["id"], store)
+                    )
             
-    #     except Exception as e: 
-    #         print("Error caching reviews")
+            results = await asyncio.gather(*store_tasks, return_exceptions=True)
+
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    store_name = list(reviews.keys())[i]
+                    print(f"ERROR: Failed to store reviews for {store_name}: {result}")
+                    raise result
+            
+        except Exception as e: 
+            raise
     
-    
-    
-    
+    async def _store_store_reviews(self, store_reviews: List[Dict], comparison_id: str, product_id: str, store: str):
+        try:
+            batch_size = 50 
+            batch_tasks = []
+            
+            for i in range(0, len(store_reviews), batch_size):
+                batch_reviews = store_reviews[i:i + batch_size]
+                batch_tasks.append(
+                    self.pinecone.store_comparison_reviews(
+                        reviews=batch_reviews, 
+                        comparison_id=comparison_id, 
+                        product_id=product_id,
+                        store=store,
+                    )
+                )
+            
+            results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+        
+            # Add error checking
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    raise result        
+            
+        except Exception as e:
+            raise
+        
+        
     # ========== EXTRACTING AMAZON AND WALMART REVIEWS ============
     async def _extract_amazon_reviews(self, product: Dict) -> List[Dict]:
         try:
@@ -232,13 +204,17 @@ class ReviewExtractionService:
             first_page_url = f"https://www.walmart.com/reviews/product/{product_id}?entryPoint=viewAllReviewsBottom"
             first_page_html = await self.bright_data.get_product_page(first_page_url)
             total_pages = self._get_walmart_total_pages(first_page_html)
-            max_pages = min(total_pages, 10)
+            max_pages = min(total_pages, 5)
             
-            page_tasks = []
-            for page in range(1, max_pages + 1): 
-                page_url = f"https://www.walmart.com/reviews/product/{product_id}?entryPoint=viewAllReviewsBottom&page={page}"
-                page_tasks.append(self._extract_walmart_page_reviews_bs(page_url, product["name"]))
-                
+            semaphore = asyncio.Semaphore(3)
+            
+            async def extract_page_with_semaphore(page):
+                async with semaphore:
+                    page_url = f"https://www.walmart.com/reviews/product/{product_id}?entryPoint=viewAllReviewsBottom&page={page}"
+                    return await self._extract_walmart_page_reviews_bs(page_url, product["name"])
+            
+        
+            page_tasks = [extract_page_with_semaphore(page) for page in range(1, max_pages + 1)]
             page_results = await asyncio.gather(*page_tasks, return_exceptions=True)
 
             all_reviews = []
@@ -320,32 +296,32 @@ class ReviewExtractionService:
     # extrating walmart content scraping
     def _parse_walmart_review_container(self, container, product_name: str) -> Optional[Dict]:
         try:
-            # Extract date
+            # extracting date
             date_elem = container.find("div", class_=lambda x: x and "f7" in x and "gray" in x and "flex" in x and "justify-end" in x)
             if not date_elem:
                 date_elem = container.find("div", class_="f7 gray flex flex-auto flex-none-l tr tl-l justify-end justify-start-l")
             review_date = date_elem.get_text(strip=True) if date_elem else ""
             
-            # Extract reviewer name
+            # extracting reviewer name
             name_elem = container.find("span", class_=lambda x: x and "f7" in x and "b" in x and "mv0" in x)
             if not name_elem:
                 name_elem = container.find("span", class_="f7 b mv0")
             reviewer_name = name_elem.get_text(strip=True) if name_elem else ""
             
-            # Extract rating
+            # extracting rating
             star_container = container.find("div", class_=lambda x: x and "w_ExHd" in x and "w_y6ym" in x)
             rating = 0
             if star_container:
                 filled_stars = star_container.find_all("svg", class_=lambda x: x and "w_1jp4" in x)
                 rating = len(filled_stars)
             
-            # Extract review title
+            # extracting review title
             title_elem = container.find("h3", class_=lambda x: x and "w_kV33" in x and "w_Sl3f" in x and "w_mvVb" in x)
             if not title_elem:
                 title_elem = container.find("h3", class_="w_kV33 w_Sl3f w_mvVb f5 b")
             review_title = title_elem.get_text(strip=True) if title_elem else ""
             
-            # Extract review text
+            # extracting review text
             text_container = container.find("span", class_=lambda x: x and "tl-m" in x and "db-m" in x)
             review_text = ""
             if text_container:
@@ -353,7 +329,7 @@ class ReviewExtractionService:
                     b_tag.decompose()
                 review_text = text_container.get_text(strip=True)
             
-            # Extract helpful votes
+            # extracting helpful votes
             helpful_votes = 0
             upvote_buttons = container.find_all("button", {"aria-label": lambda x: x and "Upvote" in x})
             for upvote_button in upvote_buttons:
@@ -365,7 +341,7 @@ class ReviewExtractionService:
                         helpful_votes = int(vote_match.group(1))
                         break
             
-            # Extract verified purchase status
+            # extracting verified purchase status
             verified_purchase = False
             verified_elems = container.find_all("span", class_=lambda x: x and "b" in x and "f7" in x and "dark-gray" in x)
             for elem in verified_elems:
@@ -392,11 +368,16 @@ class ReviewExtractionService:
             return None
         
     # checking the status of snapshot and adding a poll mechanism
-    async def _poll_amazon_results(self, snapshot_id: str, max_wait: int = 300) -> List[Dict]:
+    async def _poll_amazon_results(self, snapshot_id: str, max_wait: int = 120) -> List[Dict]:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                for attempt in range(max_wait // 5):
-                    print(f"Polling Amazon snapshot {snapshot_id}, attempt {attempt + 1}")
+                intervals = [2, 2, 3, 5, 5, 10, 10, 15, 15, 20]
+                
+                for i, interval in enumerate(intervals):
+                    if sum(intervals[:i+1]) >= max_wait:
+                        break
+                
+                    print(f"Polling Amazon snapshot {snapshot_id}, attempt {i + 1}")
                     
                     response = await client.get(
                         f"https://api.brightdata.com/datasets/v3/snapshot/{snapshot_id}",
@@ -409,12 +390,11 @@ class ReviewExtractionService:
                             reviews_data = response.json()
                             if isinstance(reviews_data, list) and len(reviews_data) > 0:
                                 return reviews_data
-                            else:
-                                print("Snapshot not ready yet, continuing to poll...")
                         except json.JSONDecodeError as e:
                             print(f"JSON decode error: {e}")
-                    
-                    await asyncio.sleep(10)
+                
+                    await asyncio.sleep(interval)
+                
                 return []
                 
         except Exception as e:

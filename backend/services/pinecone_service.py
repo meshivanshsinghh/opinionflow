@@ -5,8 +5,9 @@ from uuid import uuid4
 from pinecone import Pinecone, ServerlessSpec
 from core.config import get_settings
 from utils.retry import with_retry
-import numpy as np
 from huggingface_hub import InferenceClient
+import hashlib
+import asyncio
 
 class PineconeService: 
     def __init__(self):
@@ -56,23 +57,20 @@ class PineconeService:
     async def _generate_embedding(self, text: str) -> List[float]:
         try:
             if self.hf_client:
-                # Use HuggingFace InferenceClient for feature extraction
                 result = self.hf_client.feature_extraction(
                     text, 
                     model="sentence-transformers/all-MiniLM-L6-v2"
                 )
                 
-                # Convert result to list if it's numpy array or tensor
                 if hasattr(result, 'tolist'):
                     embedding = result.tolist()
                 else:
                     embedding = list(result)
                 
-                # Handle 2D array (batch dimension)
+                #handling 2d array
                 if isinstance(embedding[0], list):
                     embedding = embedding[0]
                 
-                # Ensure correct dimension
                 if len(embedding) > self.embedding_dimension:
                     embedding = embedding[:self.embedding_dimension]
                 elif len(embedding) < self.embedding_dimension:
@@ -89,21 +87,16 @@ class PineconeService:
             return self._simple_hash_embedding(text)
              
     def _simple_hash_embedding(self, text: str) -> List[float]:
-        import hashlib
         
-        # Create a simple but consistent embedding
         hash_obj = hashlib.md5(text.encode())
         hash_bytes = hash_obj.digest()
-        
-        # Convert to float vector
         embedding = []
         for i in range(0, len(hash_bytes), 4):
             chunk = hash_bytes[i:i+4]
             if len(chunk) == 4:
                 val = int.from_bytes(chunk, 'big') / (2**32)
                 embedding.append(val)
-        
-        # Pad or truncate to desired dimension
+
         while len(embedding) < self.embedding_dimension:
             embedding.extend(embedding[:min(len(embedding), self.embedding_dimension - len(embedding))])
         
@@ -111,10 +104,8 @@ class PineconeService:
     
     def _is_expired(self, expires_at) -> bool: 
         if isinstance(expires_at, (int, float)):
-            # Handle numeric timestamp
             return datetime.now().timestamp() > expires_at
         else:
-            # Handle ISO string (fallback)
             expiry_time = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
             return datetime.now(expiry_time.tzinfo) > expiry_time
     
@@ -123,12 +114,10 @@ class PineconeService:
     async def search_discovery_cache_exact(self, query: str) -> Optional[Dict[str, Any]]:
         await self._ensure_indexes_exist()
         try:
-            # Normalize the query for exact matching
             normalized_query = self._normalize_search_query(query)            
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             current_timestamp = datetime.now().timestamp()
             
-            # Use dummy vector with exact metadata filter
             results = index.query(
                 vector=[0.0] * self.embedding_dimension,
                 top_k=1,
@@ -192,8 +181,6 @@ class PineconeService:
         await self._ensure_indexes_exist()
         try:
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
-            
-            # Query with exact comparison_id filter
             results = index.query(
                 vector=[1.0] + [0.0] * (self.embedding_dimension - 1),
                 top_k=1,
@@ -223,15 +210,12 @@ class PineconeService:
             cache_id = str(uuid4())
             index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
             
-            
-            
-            # truncate review data to fit within size limits
             truncated_reviews = {}
             for store, store_reviews in reviews.items():
                 truncated_reviews[store] = []
                 for review in store_reviews:
                     truncated_review = {
-                         "review_text": review.get("review_text", "")[:500],  # Truncate to 500 chars
+                         "review_text": review.get("review_text", "")[:500],
                         "title": review.get("title", "")[:100],
                         "rating": review.get("rating", 0),
                         "review_date": review.get("review_date", ""),
@@ -244,13 +228,6 @@ class PineconeService:
                     truncated_reviews[store].append(truncated_review)
 
             dummy_embedding = [1.0] + [0.0] * (self.embedding_dimension - 1)
-            
-            # review_ids = []
-            # for store_reviews in reviews.values():
-            #     for review in store_reviews:
-            #         if "id" in review: 
-            #             review_ids.append(review["id"])
-                        
 
             metadata = {
                 "comparison_id": comparison_id,
@@ -281,50 +258,95 @@ class PineconeService:
             vectors = []
             review_ids = []
             
-            for review in reviews:
-                if not review.get("review_text"):
-                    continue
-                    
-                review_id = str(uuid4())
-                review_ids.append(review_id)
-                
-                # generating embedding for review content
-                review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
-                embedding = await self._generate_embedding(review_content)
-                
-                # Clean metadata - truncate to prevent size issues
-                metadata = {
-                    "id": review_id,
-                    "comparison_id": comparison_id,
-                    "product_id": product_id,
-                    "product_name": (review.get("product_name") or "")[:200],
-                    "store": store,
-                    "review_text": (review.get("review_text") or "")[:2000],
-                    "title": (review.get("title") or "")[:200],
-                    "rating": review.get("rating") or 0,
-                    "author_name": review.get("author_name", "")[:100],
-                    "verified_purchase": review.get("verified_purchase", False),
-                    "timestamp": datetime.now().isoformat(),
-                    "is_comparison_review": True
-                }
-                
-                vectors.append({
-                    "id": review_id,
-                    "values": embedding,
-                    "metadata": metadata
-                })
+            batch_size = 50
             
-            # Batch upsert (100 vectors at a time)
-            for i in range(0, len(vectors), 100):
-                batch = vectors[i:i + 100]
-                index.upsert(vectors=batch)
+            async def process_review_batch(review_batch):
+                batch_vectors = []
+                batch_ids = []
+
+                embedding_tasks = []
+                for review in review_batch:
+                    if not review.get("review_text"):
+                        continue
+                    review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
+                    embedding_tasks.append(self._generate_embedding(review_content))
+                
+                embeddings = await asyncio.gather(*embedding_tasks, return_exceptions=True)
+                
+                for i, (review, embedding) in enumerate(zip(review_batch, embeddings)):
+                    if isinstance(embedding, Exception):
+                        continue
+                    if not review.get("review_text"):
+                        continue
+                        
+                    review_id = str(uuid4())
+                    batch_ids.append(review_id)
+                    
+                    metadata = {
+                        "id": review_id,
+                        "comparison_id": comparison_id,
+                        "product_id": product_id,
+                        "product_name": (review.get("product_name") or "")[:200],
+                        "store": store,
+                        "review_text": (review.get("review_text") or "")[:1500],
+                        "title": (review.get("title") or "")[:150],
+                        "rating": review.get("rating") or 0,
+                        "author_name": review.get("author_name", "")[:80],
+                        "verified_purchase": review.get("verified_purchase", False),
+                        "timestamp": datetime.now().isoformat(),
+                        "is_comparison_review": True
+                    }
+                    
+                    batch_vectors.append({
+                        "id": review_id,
+                        "values": embedding,
+                        "metadata": metadata
+                    })
+                
+                return batch_vectors, batch_ids
+        
+            batch_tasks = []
+            for i in range(0, len(reviews), batch_size):
+                batch = reviews[i:i + batch_size]
+                batch_tasks.append(process_review_batch(batch))
+            
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            failed_batches = 0
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    failed_batches += 1
+                    continue
+                batch_vectors, batch_ids = result
+                vectors.extend(batch_vectors)
+                review_ids.extend(batch_ids)
+
+            if failed_batches > 0:
+                print(f"WARNING: {failed_batches} batches failed during processing")
+            
+            if not vectors:
+                raise Exception(f"No vectors to store for {store} - all batches failed")
+
+            # Store vectors in smaller batches
+            upsert_batch_size = 100
+            failed_upserts = 0
+            for i in range(0, len(vectors), upsert_batch_size):
+                batch = vectors[i:i + upsert_batch_size]
+                try:
+                    index.upsert(vectors=batch)
+                except Exception as e:
+                    failed_upserts += 1
+                    
+            if failed_upserts > 0:
+                raise Exception(f"{failed_upserts} upsert batches failed for {store}")
             
             return review_ids
+            
             
         except Exception as e:
             print(f"Error storing comparison reviews: {e}")
             raise
-
+        
     @with_retry(max_retries=3)
     async def search_reviews_by_comparison(self, comparison_id: str, question: str, top_k: int = 1000) -> List[Dict]:
         await self._ensure_indexes_exist()
@@ -357,94 +379,12 @@ class PineconeService:
         except Exception as e:
             print(f"Error searching reviews by comparison: {e}")
             return []
-
-    # ========== LEGACY SESSION-BASED METHODS (Keep for backward compatibility) ==========
-    # @with_retry(max_retries=3)
-    # async def store_reviews(self, reviews: List[Dict], session_id: str, product_id: str, store: str) -> List[str]:
-    #     await self._ensure_indexes_exist()
-    #     try:
-    #         index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
-    #         vectors = []
-    #         review_ids = []
-            
-    #         for review in reviews:
-    #             if not review.get("review_text"):
-    #                 continue
-                    
-    #             review_id = str(uuid4())
-    #             review_ids.append(review_id)
-                
-    #             # Create review text for embedding
-    #             review_content = f"Title: {review.get('title', '')} Review: {review.get('review_text', '')}"
-    #             embedding = await self._generate_embedding(review_content)  # Add await
-                
-    #             # Clean metadata - ensure no null values
-    #             metadata = {
-    #                 "session_id": session_id,
-    #                 "product_id": product_id,
-    #                 "product_name": review.get("product_name") or "",
-    #                 "store": store,
-    #                 "review_text": review.get("review_text") or "",
-    #                 "title": review.get("title") or "",
-    #                 "rating": review.get("rating") or 0,
-    #                 "review_date": review.get("review_date") or "",
-    #                 "helpful_votes": review.get("helpful_votes") or 0,
-    #                 "timestamp": datetime.now().isoformat()
-    #             }
-                
-    #             vectors.append({
-    #                 "id": review_id,
-    #                 "values": embedding,
-    #                 "metadata": metadata
-    #             })
-            
-    #         # Batch upsert (100 vectors at a time)
-    #         for i in range(0, len(vectors), 100):
-    #             batch = vectors[i:i + 100]
-    #             index.upsert(vectors=batch)
-            
-    #         return review_ids
-            
-    #     except Exception as e:
-    #         print(f"Error storing reviews: {e}")
-    #         raise
-    
-    # @with_retry(max_retries=3)
-    # async def search_reviews_by_session(self, session_id: str, question: str, top_k: int = 20) -> List[Dict]:
-    #     await self._ensure_indexes_exist()
-    #     try:
-    #         question_embedding = await self._generate_embedding(question)  # Add await
-    #         index = self.pc.Index(self.settings.PINECONE_REVIEWS_INDEX)
-            
-    #         results = index.query(
-    #             vector=question_embedding,
-    #             top_k=top_k,
-    #             include_metadata=True,
-    #             filter={"session_id": session_id}
-    #         )
-            
-    #         return [
-    #             {
-    #                 "review_text": match.metadata["review_text"],
-    #                 "title": match.metadata["title"],
-    #                 "rating": match.metadata["rating"],
-    #                 "store": match.metadata["store"],
-    #                 "product_name": match.metadata["product_name"],
-    #                 "similarity_score": match.score
-    #             }
-    #             for match in results.matches
-    #         ]
-            
-    #     except Exception as e:
-    #         print(f"Error searching reviews: {e}")
-    #         return []
     
     async def cleanup_expired_cache(self):
         await self._ensure_indexes_exist()
         try:
             index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
             
-            # Query for expired entries
             current_time = datetime.now().isoformat()
             results = index.query(
                 vector=[0] * self.embedding_dimension,
@@ -462,10 +402,7 @@ class PineconeService:
             print(f"Error cleaning up expired cache: {e}")
     
     def _normalize_search_query(self, query: str) -> str:
-        # Convert to lowercase, remove extra spaces, sort words
         words = query.lower().strip().split()
-        
-        # removing common stop words
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'for', 'with'}
         filtered_words = [word for word in words if word not in stop_words]
         
@@ -486,7 +423,7 @@ class PineconeService:
             
             metadata = {
                 "comparison_id": comparison_id,
-                "is_comparison_flag": True,  # Changed from cache to flag
+                "is_comparison_flag": True,
                 "review_count": review_count,
                 "timestamp": datetime.now().isoformat(),
                 "expires_at": (datetime.now() + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp(),
@@ -526,3 +463,58 @@ class PineconeService:
         except Exception as e:
             print(f"Error checking comparison exists: {e}")
             return False
+        
+    @with_retry(max_retries=3)
+    async def search_discovery_cache_by_key(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        await self._ensure_indexes_exist()
+        try:
+            index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
+            current_timestamp = datetime.now().timestamp()
+            
+            try:
+                result = index.fetch(ids=[cache_key])
+                if cache_key in result.vectors:
+                    metadata = result.vectors[cache_key].metadata
+                    if metadata.get("expires_at", 0) > current_timestamp:
+                        return {
+                            "discovered_products": json.loads(metadata["discovered_products"]),
+                            "cached_at": metadata["timestamp"],
+                            "similarity_score": 1.0,
+                        }
+            except Exception:
+                pass
+            
+            return None
+            
+        except Exception as e: 
+            print(f"Error searching discovery cache: {e}")
+            return None
+        
+    @with_retry(max_retries=3)
+    async def cache_discovery_results_by_key(self, cache_key: str, query: str, products: Dict[str, List[Dict]]) -> str:
+        await self._ensure_indexes_exist()
+        try:
+            current_time = datetime.now()
+            expires_at_timestamp = (current_time + timedelta(days=self.settings.CACHE_EXPIRY_DAYS)).timestamp()
+        
+            index = self.pc.Index(self.settings.PINECONE_DISCOVERY_INDEX)
+            query_embedding = await self._generate_embedding(query)
+            
+            index.upsert(vectors=[{
+                "id": cache_key,
+                "values": query_embedding,
+                "metadata": {
+                    "search_query": query,
+                    "cache_key": cache_key,
+                    "timestamp": current_time.isoformat(),
+                    "expires_at": expires_at_timestamp,
+                    "discovered_products": json.dumps(products),
+                    "product_count": sum(len(prods) for prods in products.values()),
+                }
+            }])
+            
+            return cache_key
+            
+        except Exception as e:
+            print(f"Error caching discovery results: {e}")
+            raise

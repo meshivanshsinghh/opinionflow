@@ -1,5 +1,4 @@
 from core.config import get_settings
-from core.exceptions import ExtractionError
 from utils.retry import with_retry
 import httpx
 from bs4 import BeautifulSoup
@@ -8,40 +7,40 @@ from typing import Dict, List
 from urllib.parse import quote_plus
 import json
 import asyncio
+import aiohttp
 
 class BrightDataClient:
 
     def __init__(self):
         settings = get_settings()
-
         self.api_key = settings.BRIGHT_DATA_API_KEY
         self.serp_zone = settings.BRIGHT_DATA_SERP_ZONE
         self.webunlocker_zone = settings.BRIGHT_DATA_WEBUNLOCKER_ZONE   
-
-        # # Proxy based auth
-        # self.host = settings.BRIGHT_DATA_HOST
-        # self.port = settings.BRIGHT_DATA_PORT
-        # # Serp zone credentials 
-        # self.serp_username = settings.BRIGHT_DATA_SERP_USERNAME
-        # self.serp_password = settings.BRIGHT_DATA_SERP_PASSWORD
-
-        # # web unlocker credentials
-        # self.webunlocker_username = settings.BRIGHT_DATA_WEBUNLOCKER_USERNAME
-        # self.webunlocker_password = settings.BRIGHT_DATA_WEBUNLOCKER_PASSWORD
         
-        # browser api credentials
-        self.browserapi_username = settings.BRIGHT_DATA_BROWSER_API_USERNAME
-        self.browserapi_password = settings.BRIGHT_DATA_BROWSER_API_PASSWORD
-        
-    @property
-    def auth(self):
-        return f"{self.browserapi_username}:{self.browserapi_password}"
+        self.session = None
+    
+    async def _ensure_session(self):
+        if self.session is None or self.session.closed:
+            timeout = aiohttp.ClientTimeout(total=30)
+            self.session = aiohttp.ClientSession(timeout=timeout)
+    
+    async def close(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+     
+    async def __aenter__(self):
+        await self._ensure_session()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
     
     # making request
     @with_retry(max_retries=2)
     async def _make_request(self, url: str, zone: str, format: str = 'raw') -> str:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
+        await self._ensure_session()
+        try:
+            async with self.session.post(
                 'https://api.brightdata.com/request',
                 headers={
                     'Authorization': f'Bearer {self.api_key}',
@@ -52,13 +51,15 @@ class BrightDataClient:
                     'url': url,
                     'format': format
                 }
-            )
-            print(f"Response status: {response.status_code}")  
-            if response.status_code != 200:
-                print(f"Error response: {response.text}") 
+            ) as response:
+                if response.status != 200:
+                    text = await response.text()
+                    response.raise_for_status()
                 
-            response.raise_for_status()
-            return response.text
+                return await response.text()
+        except Exception as e:
+            await self.close()
+            raise
 
     # discovering urls
     async def discover(self, product: str, max_per_store: int = 5) -> Dict[str, List[str]]:
@@ -84,7 +85,6 @@ class BrightDataClient:
                 print(f"Error searching {store_name}: {e}")
                 return (store_name, [])
 
-        # Run searches concurrently with timeout
         tasks = [
             search_store_with_timeout(store_name, query)
             for store_name, query in stores.items()
@@ -97,7 +97,6 @@ class BrightDataClient:
             print("Discovery phase timed out")
             return {}
 
-        # Process results, handling exceptions
         final_results = {}
         for result in results:
             if isinstance(result, Exception):
@@ -143,7 +142,6 @@ class BrightDataClient:
                     if clean_url not in product_urls:
                         product_urls.append(clean_url)
                         
-                    # Stop early if we have enough URLs
                     if len(product_urls) >= max_per_store:
                         break
 

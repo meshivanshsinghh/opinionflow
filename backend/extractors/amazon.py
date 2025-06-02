@@ -59,7 +59,6 @@ class AmazonExtractor(BaseProductExtractor):
                     if match:
                         rating = float(match.group(1))
 
-            # 2. <span class="a-icon-alt">4.0 out of 5 stars</span>
             if rating is None:
                 alt = soup.find("span", class_="a-icon-alt")
                 if alt:
@@ -67,7 +66,6 @@ class AmazonExtractor(BaseProductExtractor):
                     if match:
                         rating = float(match.group(1))
 
-            # 3. <span data-hook="rating-out-of-text">4 out of 5</span>
             if rating is None:
                 rating_text = soup.find("span", attrs={"data-hook": "rating-out-of-text"})
                 if rating_text:
@@ -75,7 +73,6 @@ class AmazonExtractor(BaseProductExtractor):
                     if match:
                         rating = float(match.group(1))
 
-            # 4. Fallback: any span with "out of 5"
             if rating is None:
                 for span in soup.find_all("span"):
                     text = span.get_text(strip=True)

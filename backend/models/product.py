@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl, field_validator, Field
+from pydantic import BaseModel, HttpUrl, Field
 from typing import Dict, Optional
 from datetime import datetime
 from uuid import uuid4

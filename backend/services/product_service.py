@@ -7,6 +7,9 @@ from datetime import datetime
 from services.gemini import GeminiModel
 from uuid import uuid4
 from services.pinecone_service import PineconeService
+from fastapi import HTTPException
+from collections import OrderedDict
+import hashlib
 
 class ProductService:
     def __init__(
@@ -23,55 +26,56 @@ class ProductService:
         self.extractors = {
             "walmart": WalmartExtractor(self.bright_data),
             "amazon": AmazonExtractor(self.bright_data),
-            # "target": TargetExtractor(self.bright_data)
         }
         self.selected_products = {}
-        self.extraction_semaphore = asyncio.Semaphore(3)
-        self.gemini_semaphore = asyncio.Semaphore(1)  
+        
+        self.MAX_PRODUCT_STORE_SIZE = 1000
+        self.product_store = OrderedDict()
+        self.product_store_lock = asyncio.Lock()
+        
+        self.extraction_semaphore = asyncio.Semaphore(6)
+        self.gemini_semaphore = asyncio.Semaphore(3)  
+        
+        # background tasks
+        self.background_tasks = {}
 
     def _detect_store(self, url: str) -> str:
         if "walmart.com" in url:
             return "walmart"
         elif "amazon.com" in url:
             return "amazon"
-        # elif "target.com" in url:
-        #     return "target"
         raise ValueError("Unsupported store URL")
 
-
+    def _generate_cache_key(self, query: str) -> str:
+        normalized = query.lower().strip()
+        return f"DISC_{hashlib.md5(normalized.encode()).hexdigest()}"
+    
     # discover products
-    async def discover_products(self, query: str, max_per_store: int = 5) -> Dict[str, List[Product]]:
-        # Add overall timeout
+    async def discover_products_fast(self, query: str, max_per_store: int = 5) -> Dict[str, List[Product]]:
+        """Fast discovery that returns products immediately without specifications"""
         try:
-            async with asyncio.timeout(120):
-                return await self._discover_products_impl(query, max_per_store)
+            cache_key = self._generate_cache_key(query)
+            cached_results = await self.pinecone.search_discovery_cache_by_key(cache_key)
+            if cached_results:
+                return self._convert_cached_to_products(cached_results["discovered_products"])
+            
+            async with asyncio.timeout(60):
+                return await self._discover_products_fast_impl(query, max_per_store, cache_key)
         except asyncio.TimeoutError:
             raise HTTPException(status_code=408, detail="Discovery request timed out")
 
-
-    # discover products impl
-    async def _discover_products_impl(self, query: str, max_per_store: int = 5) -> Dict[str, List[Product]]:
-        # Try exact cache first
-        cached_results = await self.pinecone.search_discovery_cache_exact(query)
-        if cached_results:
-            print(f"Exact cache hit for query: {query} (similarity: {cached_results['similarity_score']:.3f})")
-            return self._convert_cached_to_products(cached_results["discovered_products"])
-
-        # doing a fresh discovery
-        try:
+    async def _discover_products_fast_impl(self, query: str, max_per_store: int, cache_key: str) -> Dict[str, List[Product]]:
+        
+        try: 
             store_urls = await self.bright_data.discover(query, max_per_store)
-        except Exception as e:
+        except Exception as e: 
             print(f"Error during discovery: {e}")
             return {}
-            
-        if not store_urls:
+        
+        if not store_urls: 
             print("No URLs found during discovery")
             return {}
-
-        all_products = []
-        results: Dict[str, List[Product]] = {}
-
-        # Prepare extraction tasks with concurrency control
+        
         extraction_tasks = []
         task_metadata = []
 
@@ -88,19 +92,15 @@ class ProductService:
             print("No extraction tasks created")
             return {}
 
-        # Run extractions with timeout
-        try:
-            async with asyncio.timeout(90):
-                extraction_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
-        except asyncio.TimeoutError:
-            print("Some product extractions timed out, proceeding with partial results")
-            # Create partial results for completed tasks
-            extraction_results = [None] * len(extraction_tasks)
-
-        # Process results
+        
+        extraction_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
+        
+        results: Dict[str, List[Product]] = {}
+        all_products = []
+        
         for (store, url), prod_dict in zip(task_metadata, extraction_results):
             if isinstance(prod_dict, Exception) or prod_dict is None:
-                print(f"Error/timeout extracting {store} product from {url}: {prod_dict}")
+                print(f"Error extracting {store} product from {url}: {prod_dict}")
                 continue
             
             if not isinstance(prod_dict, dict):
@@ -108,32 +108,17 @@ class ProductService:
                 continue
             
             prod_dict["id"] = str(uuid4())
+            prod_dict["specifications"] = {}
             if store not in results:
                 results[store] = []
             results[store].append(prod_dict)
             all_products.append(prod_dict)
 
-        # Early return if no products found
         if not all_products:
             print("No products successfully extracted")
             return results
 
-        # Batch Gemini call with timeout and chunking
-        try:
-            async with asyncio.timeout(60):
-                gemini_specs = await self._batch_extract_with_chunking(all_products)
-                for prod, specs in zip(all_products, gemini_specs):
-                    prod["specifications"] = specs
-        except asyncio.TimeoutError:
-            print("Gemini processing timed out, using empty specifications")
-            for prod in all_products:
-                prod["specifications"] = {}
-        except Exception as e:
-            print(f"Error in Gemini processing: {e}")
-            for prod in all_products:
-                prod["specifications"] = {}
-
-        # Convert dicts to Product models for API response
+        # Convert to Product objects
         for store, products in results.items():
             results[store] = [
                 Product(
@@ -144,7 +129,7 @@ class ProductService:
                     price=prod["price"],
                     review_count=prod["review_count"],
                     last_scraped=prod["last_scraped"],
-                    specifications=prod["specifications"],
+                    specifications={},
                     rating=prod["rating"],
                     image_url=prod["image_url"],
                 )
@@ -152,31 +137,86 @@ class ProductService:
                 if prod.get("name") and prod.get("url")
             ]
             
-        # Cache the results
-        try:
-            products_for_cache = {}
-            for store, product_dicts in results.items():
-                products_for_cache[store] = [
-                    {
-                        "id": prod.id,
-                        "name": prod.name,
-                        "url": str(prod.url),
-                        "source": prod.source,
-                        "price": prod.price,
-                        "review_count": prod.review_count,
-                        "rating": prod.rating,
-                        "image_url": prod.image_url,
-                        "specifications": prod.specifications
-                    }
-                    for prod in product_dicts
-                ]
             
-            await self.pinecone.cache_discovery_results_exact(query, products_for_cache)
-        except Exception as e:
-            print(f"Error caching results: {e}")
-                
+            # storing products with thread safety
+            async with self.product_store_lock:
+                for i, product in enumerate(results[store]):
+                    original_data = products[i]
+                    self.product_store[product.id] = {
+                        "product": product,
+                        "raw_data": original_data
+                    }
+                    
+                    # cleaning up old entries
+                    if len(self.product_store) > self.MAX_PRODUCT_STORE_SIZE:
+                        for _ in range(100):
+                            self.product_store.popitem(last=False)
+        
+        # Start background specification enhancement
+        if all_products:
+            task_id = str(uuid4())
+            task = asyncio.create_task(
+                self._enhance_products_with_specs_background(query, all_products, results, cache_key)
+            )
+            self.background_tasks[task_id] = task 
+            
+            # cleaning up completed tasks
+            self._cleanup_background_tasks() 
+        
         return results
 
+    async def _enhance_products_with_specs_background(self, query: str, products: List[dict], results: Dict[str, List[Product]], cache_key: str):
+        try:
+            async with asyncio.timeout(60):
+                gemini_specs = await self._batch_extract_with_chunking(products)
+                
+                async with self.product_store_lock:
+                    for prod, specs in zip(products, gemini_specs):
+                        prod["specifications"] = specs
+                        
+                        if prod["id"] in self.product_store:
+                            self.product_store[prod["id"]]["product"].specifications = specs
+                            self.product_store[prod["id"]]["raw_data"]["specifications"] = specs
+                    
+                # preparing data for caching
+                products_for_cache = {}
+                for store, product_list in results.items():
+                    products_for_cache[store] = [
+                        {
+                            "id": prod.id,
+                            "name": prod.name,
+                            "url": str(prod.url),
+                            "source": prod.source,
+                            "price": prod.price,
+                            "review_count": prod.review_count,
+                            "rating": prod.rating,
+                            "image_url": prod.image_url,
+                            "specifications": next((p["specifications"] for p in products if p["id"] == prod.id), {})
+                        }
+                        for prod in product_list
+                    ]
+
+                await self.pinecone.cache_discovery_results_by_key(cache_key, query, products_for_cache)
+                print(f"Background enhancement completed and cached for query: {query}")
+                
+        except asyncio.TimeoutError:
+            print("Background specification enhancement timed out")
+        except Exception as e:
+            print(f"Error in background specification enhancement: {e}")
+    
+    
+    # cleanup background tasks
+    def _cleanup_background_tasks(self):
+        completed_tasks = [
+            task_id for task_id, task in self.background_tasks.items()
+            if task.done()
+        ]
+        for task_id in completed_tasks:
+            task = self.background_tasks[task_id]
+            if task.exception():
+                print(f"Background task {task_id} failed: {task.exception()}")
+            del self.background_tasks[task_id]
+            
     async def _extract_with_semaphore(self, extractor, url):
         async with self.extraction_semaphore:
             try:
@@ -189,7 +229,7 @@ class ProductService:
                 print(f"Extraction error for URL {url}: {e}")
                 return None
             
-    async def _batch_extract_with_chunking(self, products, chunk_size=5):
+    async def _batch_extract_with_chunking(self, products, chunk_size=3):
         all_specs = []
         
         for i in range(0, len(products), chunk_size):
@@ -232,8 +272,7 @@ class ProductService:
     def select_product(self, store: str, product: Product) -> None:
         if store in self.selected_products:
             self.selected_products[store].is_selected = False
-
-        # selecting new product
+        
         product.is_selected = True
         self.selected_products[store] = product
 
@@ -260,19 +299,79 @@ class ProductService:
     
     def _convert_cached_to_products(self, cached_products: Dict[str, List[Dict]]) -> Dict[str, List[Product]]:
         results = {}
-        for store, products in cached_products.items():
-            results[store] = [
-                Product(
-                    id=prod["id"],
-                    name=prod["name"],
-                    url=prod["url"],
-                    source=prod["source"],
-                    price=prod["price"],
-                    review_count=prod["review_count"],
-                    rating=prod["rating"],
-                    image_url=prod["image_url"],
-                    specifications=prod["specifications"]
-                )
-                for prod in products
-            ]
-        return results
+        try:
+            for store, products in cached_products.items():
+                results[store] = []
+                for prod in products:
+                    try:
+                        product = Product(
+                            id=prod["id"],
+                            name=prod["name"],
+                            url=prod["url"],
+                            source=prod["source"],
+                            price=prod["price"],
+                            review_count=prod["review_count"],
+                            rating=prod["rating"],
+                            image_url=prod["image_url"],
+                            specifications=prod.get("specifications", {})
+                        )
+                        results[store].append(product)
+                        asyncio.create_task(self._store_cached_product(product, prod))
+                    except Exception as e:
+                        print(f"Error converting cached product: {e}")
+                        continue
+                        
+            return results
+        except Exception as e:
+            print(f"Error converting cached products: {e}")
+            return {}
+        
+    
+    async def _store_cached_product(self, product: Product, raw_data: dict):
+        async with self.product_store_lock:
+            self.product_store[product.id] = {
+                "product": product,
+                "raw_data": raw_data,
+                "timestamp": datetime.now()
+            }
+
+    async def get_specifications_for_products(self, product_ids: List[str]) -> Dict[str, Dict]:
+        enhanced_products = {}
+        products_needing_specs = []
+        
+        async with self.product_store_lock:    
+            for product_id in product_ids:
+                if product_id in self.product_store:
+                    stored_product = self.product_store[product_id]["product"]
+                    if stored_product.specifications:
+                        enhanced_products[product_id] = stored_product.specifications
+                        print(f"Using cached specs for product {product_id}")
+                    else:
+                        raw_data = self.product_store[product_id]["raw_data"]
+                        products_needing_specs.append(raw_data)
+                        print(f"Need to process specs for product {product_id}")
+                else:
+                    print(f"Product {product_id} not found in store")
+                    enhanced_products[product_id] = {}
+        
+        if products_needing_specs:
+            print(f"Processing specifications for {len(products_needing_specs)} products")
+            try:
+                specs = await self._batch_extract_with_chunking(products_needing_specs)
+                
+                async with self.product_store_lock:
+                    for i, prod in enumerate(products_needing_specs):
+                        spec_data = specs[i] if i < len(specs) else {}
+                        enhanced_products[prod["id"]] = spec_data
+                        
+                        if prod["id"] in self.product_store:
+                            self.product_store[prod["id"]]["product"].specifications = spec_data
+                            self.product_store[prod["id"]]["raw_data"]["specifications"] = spec_data
+                            
+            except Exception as e:
+                print(f"Error enhancing specifications: {e}")
+                for prod in products_needing_specs:
+                    enhanced_products[prod["id"]] = {}
+        
+        print(f"Returning specs for {len(enhanced_products)} products")
+        return enhanced_products

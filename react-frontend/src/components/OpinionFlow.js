@@ -1,15 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { v4 as uuidv4 } from "uuid";
-import axios from "axios";
-import {
-  Search,
-  ShoppingCart,
-  BarChart3,
-  MessageCircle,
-  Loader2,
-} from "lucide-react";
+import { Search, ShoppingCart, BarChart3, MessageCircle } from "lucide-react";
 import ProductSearch from "./ProductSearch";
 import ProductSelection from "./ProductSelection";
 import AnalysisResults from "./AnalysisResults";
@@ -17,7 +9,6 @@ import ChatInterface from "./ChatInterface";
 import { apiClient, endpoints, handleApiError } from "../utils/api";
 
 const OpinionFlow = () => {
-  const [sessionId] = useState(() => uuidv4());
   const [selectedProducts, setSelectedProducts] = useState({});
   const [analysisResults, setAnalysisResults] = useState(null);
   const [productsData, setProductsData] = useState({});
@@ -25,6 +16,8 @@ const OpinionFlow = () => {
   const [loading, setLoading] = useState(false);
   const [searchStatus, setSearchStatus] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("");
+  const [specsLoading, setSpecsLoading] = useState(false);
+  const [specsStatus, setSpecsStatus] = useState("");
 
   const searchProducts = async (query, maxPerStore = 5) => {
     if (!query.trim()) {
@@ -37,7 +30,7 @@ const OpinionFlow = () => {
 
     try {
       const response = await apiClient.post(
-        `${endpoints.discover}`,
+        endpoints.discover,
         { query, max_per_store: maxPerStore },
         { timeout: 60000 }
       );
@@ -60,11 +53,57 @@ const OpinionFlow = () => {
       );
       setSearchStatus(`✅ Found ${totalProducts} products for: **${query}**`);
       setCurrentStep(2);
+
+      // adding method after getting products
+      await enhanceProductSpecifications(products);
     } catch (error) {
       const errorMessage = handleApiError(error);
       setSearchStatus(`❌ Error searching products: ${errorMessage}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const enhanceProductSpecifications = async (products) => {
+    const productIds = Object.values(products)
+      .flat()
+      .map((product) => product.id)
+      .filter(Boolean);
+
+    if (productIds.length === 0) return;
+
+    setSpecsLoading(true);
+    setSpecsStatus("🔧 Loading product specifications...");
+
+    try {
+      const response = await apiClient.post(
+        endpoints.enhanceSpecifications,
+        { product_ids: productIds },
+        { timeout: 45000 }
+      );
+
+      const { enhanced_products, products_with_specs } = response.data;
+
+      // Update products with enhanced specifications
+      const updatedProducts = { ...products };
+
+      Object.entries(updatedProducts).forEach(([store, storeProducts]) => {
+        updatedProducts[store] = storeProducts.map((product) => ({
+          ...product,
+          specifications: enhanced_products[product.id] || {},
+        }));
+      });
+
+      setProductsData(updatedProducts);
+      setSpecsStatus(
+        `✅ Loaded specifications for ${products_with_specs} products`
+      );
+    } catch (error) {
+      console.error("Error enhancing specifications:", error);
+      setSpecsStatus("⚠️ Some specifications couldn't be loaded");
+    } finally {
+      setSpecsLoading(false);
+      setTimeout(() => setSpecsStatus(""), 3000);
     }
   };
 
@@ -310,6 +349,8 @@ What would you like to know about these products?
               onAnalyze={analyzeReviews}
               loading={loading}
               status={analysisStatus}
+              specsLoading={specsLoading}
+              specsStatus={specsStatus}
             />
           </div>
         )}

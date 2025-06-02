@@ -3,7 +3,6 @@ from services.analysis_service import AnalysisService
 from dependencies import get_analysis_service
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
-import json
 
 router = APIRouter(tags=["analysis"])
 
@@ -34,7 +33,6 @@ async def answer_question(
     analysis_service: AnalysisService = Depends(get_analysis_service)
 ):
     try:
-        # Check if selected_products is provided
         if request.selected_products is None:
             return {
                 "error": "selected_products is required for answering questions",
