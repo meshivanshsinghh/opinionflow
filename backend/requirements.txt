@@ -9,3 +9,4 @@ google-generativeai
 python-dotenv
 numpy
 huggingface_hub
+aiohttp

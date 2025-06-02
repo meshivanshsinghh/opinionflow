@@ -1,7 +1,7 @@
 import axios from "axios";
 
 export const API_BASE =
-  "https://opinionflow-backend-392699812750.us-central1.run.app/api/v1";
+  "https://opinionflow-backend-v2-392699812750.us-central1.run.app/api/v1";
 
 // Create axios instance with default config
 export const apiClient = axios.create({
