@@ -181,7 +181,7 @@ class AnalysisService:
         for store in sorted(selected_products.keys()):
             product = selected_products[store]
             product_id = product.get("id", "")
-            product_keys.append(f"{store}_{product_id}")
+            product_keys.append(f"{store.strip()}_{product_id.strip()}")
         
         comparison_key = "|".join(product_keys)
         comparison_hash = hashlib.md5(comparison_key.encode()).hexdigest()[:16]

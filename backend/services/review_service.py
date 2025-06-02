@@ -60,8 +60,7 @@ class ReviewExtractionService:
             product = selected_products[store]
             product_id = product.get("id", "")
             product_keys.append(f"{store.strip()}_{product_id.strip()}")
-            
-        # creating a hash
+        
         comparison_key = "|".join(product_keys)
         comparison_hash = hashlib.md5(comparison_key.encode()).hexdigest()[:16]
         

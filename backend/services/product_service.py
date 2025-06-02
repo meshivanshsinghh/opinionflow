@@ -257,10 +257,38 @@ class ProductService:
             extractor = self.extractors[store]
             
             async with asyncio.timeout(45):
-                product = await extractor.extract_product_info(url)
-
-            product.last_updated = datetime.now()
-
+                product_dict = await extractor.extract_product_info(url)
+            
+            # generating product object
+            product_dict["id"] = str(uuid4())
+            product_dict["specifications"] = {}
+            
+            product = Product(
+                id=product_dict["id"],
+                name=product_dict["name"],
+                url=product_dict["url"],
+                source=product_dict["source"],
+                price=product_dict["price"],
+                review_count=product_dict["review_count"],
+                last_scraped=product_dict["last_scraped"],
+                specifications={},
+                rating=product_dict["rating"],
+                image_url=product_dict["image_url"],
+            )
+            
+            # storing in product store for later use
+            async with self.product_store_lock:
+                self.product_store[product.id] = {
+                    "product": product,
+                    "raw_data": product_dict,
+                    "timestamp": datetime.now()
+                }
+                
+            # extracting specifications in background
+            asyncio.create_task(
+                self._enhance_single_product_specs(product, product_dict)
+            )
+            
             return product
 
         except asyncio.TimeoutError:
@@ -268,6 +296,25 @@ class ProductService:
         except Exception as e:
             print(f"Error adding custom product {url}: {str(e)}")
             raise
+        
+    async def _enhance_single_product_specs(self, product: Product, raw_data: dict):
+        try:
+            async with self.gemini_semaphore:
+                specs = await self.gemini.batch_extract_specifications([raw_data])
+                if specs and len(specs) > 0:
+                    spec_data = specs[0]
+                    
+                    # Update both the product object and stored data
+                    product.specifications = spec_data
+                    async with self.product_store_lock:
+                        if product.id in self.product_store:
+                            self.product_store[product.id]["product"].specifications = spec_data
+                            self.product_store[product.id]["raw_data"]["specifications"] = spec_data
+                            
+                    print(f"Enhanced specifications for custom product: {product.id}")
+                    
+        except Exception as e:
+            print(f"Error enhancing specs for custom product: {e}")
 
     def select_product(self, store: str, product: Product) -> None:
         if store in self.selected_products:
