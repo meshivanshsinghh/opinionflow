@@ -1,5 +1,6 @@
 # OpinionFlow 🗣️
 
+<a href = "https://dev.to/shivanshsinghh/opinionflow-real-time-review-intelligence-with-bright-data-gemini-20-pinecone-2ec8">Read full writeup @ Dev.to</a><br><br>
 **Real‑time, cross‑store product‑review intelligence**  
 _Bright Data Real‑Time AI Agents Challenge (May 2025)_
 
